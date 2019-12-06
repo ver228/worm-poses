@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan 17 13:11:35 2019
+
+@author: avelinojaver
+"""
+import sys
+from pathlib import Path 
+root_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(root_dir))
+
+from worm_poses.models import CPM, CPM_PAF
+#%%
+import torch
+import tables
+import numpy as np
+
+from pathlib import Path
+
+import math
+import pandas as pd
+from skimage.feature import peak_local_max
+from scipy.optimize import linear_sum_assignment
+import cv2
+
+
+
+def _get_device(cuda_id = 0):
+    if torch.cuda.is_available():
+        print("THIS IS CUDA!!!!")
+        dev_str = "cuda:" + str(cuda_id)
+    else:
+        dev_str = 'cpu'
+    device = torch.device(dev_str)
+    return device
+             
+#%%
+def _get_peaks(cpm_maps, threshold_relative, threshold_abs):
+    all_coords = []
+    for mm in cpm_maps:
+        th = max(mm.max()*threshold_relative, threshold_abs)
+        coords = peak_local_max(mm, threshold_abs = th)
+        
+        all_coords.append(coords)
+        
+    return all_coords  
+
+    
+#%%
+if __name__ == '__main__':
+    from tierpsy.analysis.ske_create.helperIterROI import getROIfromInd
+    #_model_path = Path.home() / 'workspace/WormData/results/worm-poses/logs/manually-annotated-PAF_20190116_181119_CPMout-PAF_adam_lr0.0001_wd0.0_batch16/checkpoint.pth.tar'
+    
+    #_model_path = '/Users/avelinojaver/OneDrive - Nexus365/worms/skeletonize_training/manual_annotations/trained_models/manually-annotated_20190115_140602_CPMout_adam_lr0.0001_wd0.0_batch24/checkpoint.pth.tar'
+    #n_segments = 25
+    #model = CPM(n_segments = n_segments, 
+    #                         same_output_size = True)
+    
+    _model_path = '/Users/avelinojaver/OneDrive - Nexus365/worms/skeletonize_training/manual_annotations/trained_models/manually-annotated-PAF_20190116_181119_CPMout-PAF_adam_lr0.0001_wd0.0_batch16/checkpoint.pth.tar'
+    n_segments = 25
+    n_affinity_maps = 20
+    model = CPM_PAF(n_segments = n_segments, 
+                             n_affinity_maps = n_affinity_maps, 
+                             same_output_size = True)
+   
+    
+    cuda_id = 3
+    device = _get_device(cuda_id)
+    
+    
+    state = torch.load(_model_path, map_location = 'cpu')
+    model.load_state_dict(state['state_dict'])
+    
+    model = model.to(device)
+    model.eval()
+    #%%
+    
+    mask_file = '/Users/avelinojaver/OneDrive - Nexus365/worms/skeletonize_training/manual_annotations/raw/Phase3/MaskedVideos/wildMating1.1_CB4856_self_CB4856_self_PC3_Ch1_15082018_114818.hdf5'
+    
+    feat_file = mask_file.replace('MaskedVideos', 'Results').replace('.hdf5', '_featuresN.hdf5')
+    
+    pairs = [(7,68), (2, 654), (1866, 11100), (2106, 13464), (4027, 22150)]
+    
+    with pd.HDFStore(str(feat_file), 'r') as fid:
+        trajectories_data = fid['/trajectories_data']
+    
+    all_cmps = []
+    #%%
+    for worm_index, frame_number in pairs[-1:]:
+        row_data, roi, roi_corner = getROIfromInd(mask_file, trajectories_data, frame_number, worm_index, roi_size=-1)
+        
+        with torch.no_grad():
+            X = torch.tensor(roi[None, None]).float()
+            X = X.to(device)
+            X /= 255.
+            outs = model(X)
+        
+        cpm_maps, paf_maps = outs[-1]
+        paf_maps = paf_maps[0].detach().cpu().numpy()
+        cpm_maps = cpm_maps[0].detach().cpu().numpy()
+        
+        
+        all_coords = _get_peaks(cpm_maps[:1], threshold_relative = 0.5, threshold_abs = 0.05)
+        
+        
+        plt.figure()
+        plt.imshow(roi, cmap='gray')
+        for cc in all_coords:
+            plt.plot(cc[:, 1], cc[:, 0], 'o')
+            
+            
+        all_cmps.append(cpm_maps)
+        #%%
+    def cv2_peak_local_max(img, threshold_relative = 0.5, threshold_abs = 0.05):
+        #max_val = img.max()
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(img)
+        th = max(max_val*threshold_relative, threshold_abs)
+        
+        _, mm = cv2.threshold(img, th, max_val, cv2.THRESH_TOZERO)
+        #max filter
+        kernel = np.ones((3,3))
+        mm_d = cv2.dilate(mm, kernel)
+        loc_maxima = cv2.compare(mm, mm_d, cv2.CMP_GE)
+        
+        mm_e = cv2.erode(mm, kernel)
+        non_plateau = cv2.compare(mm, mm_e, cv2.CMP_GT)
+        loc_maxima = cv2.bitwise_and(loc_maxima, non_plateau)
+        
+        _, coords, _ = cv2.findContours(loc_maxima, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        coords = np.array([x.squeeze()[::-1] for cc in coords for x in cc])
+        coords = np.array(coords)
+        
+        #the code above is faster than  coords = np.array(np.where(loc_maxima>0)).T
+        return coords
+    
+    
+    N = 200
+    import time
+    tic = time.time()
+    for _ in range(N ):
+        for cpm_maps in all_cmps:
+            for mm_o in cpm_maps:
+                coords = cv2_peak_local_max(mm_o)
+    print(time.time() - tic)
+    #%%
+    
+    tic = time.time()
+    for _ in range(N ):
+        for cpm_maps in all_cmps:
+            for mm_o in cpm_maps:
+                threshold_relative = 0.5
+                threshold_abs = 0.05
+                max_val = mm_o.max()
+                th = max(max_val*threshold_relative, threshold_abs)
+                coords_f = peak_local_max(mm_o, threshold_abs = th)[::-1]
+    print(time.time() - tic)
+#%%
+    for mm_o in cpm_maps:
+        coords = cv2_peak_local_max(mm_o)
+        fig, axs = plt.subplots(1,1, figsize = (10, 10), sharex = True, sharey=True)
+        axs.imshow(mm_o)
+        y,x = zip(*coords)
+        axs.plot(x,y, '.r')
