@@ -25,8 +25,7 @@ if __name__ == '__main__':
     
     #bn = 'detection-singles_fasterrcnn_20190628_174616_adam_lr0.0001_wd0.0_batch16'
     
-    bn = 'detection-singles_keypointrcnn_20190703_085950_adam_lr0.0001_wd0.0_batch8'
-    
+    bn = 'v2_openpose_maxlikelihood_20191209_093737_adam_lr0.0001_wd0.0_batch20'
     set_type = bn.partition('_')[0]
     model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'checkpoint.pth.tar'
     

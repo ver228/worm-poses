@@ -17,45 +17,37 @@ import numpy as np
 import cv2
 
 
-from worm_poses.trainer import _get_model
-from worm_poses.flow import maps2skels
+from worm_poses.encoders import maps2skels
 
-#%%
+from check_result_PAF_rois import load_model, get_device
+
+
+
 if __name__ == '__main__':
-    model_path = '/Volumes/rescomp1/data/WormData/results/worm-poses/logs/manually-annotated-PAF_20190116_181119_CPMout-PAF_adam_lr0.0001_wd0.0_batch16/checkpoint.pth.tar'
-    model_name = 'CPMout-PAF'
-    dataset = 'manually-annotated-PAF'
-    
-    n_segments = 25
-    n_affinity_maps = 20
-    
     cuda_id = 0
-    if torch.cuda.is_available():
-        print("THIS IS CUDA!!!!")
-        dev_str = "cuda:" + str(cuda_id)
-    else:
-        dev_str = 'cpu'
-    device = torch.device(dev_str)
     
+    bn = 'allPAF_PAF+CPM_mse_20190620_003146_adam_lr0.0001_wd0.0_batch48'
     
-    
-    model, out_size = _get_model(model_name, n_segments, n_affinity_maps)
-    
-    
-    state = torch.load(model_path, map_location = 'cpu')
-    #%%
-    model.load_state_dict(state['state_dict'])
-    model.eval()
+    model_path = Path.home() / 'workspace/WormData/worm-poses/results/v1' / bn / 'checkpoint.pth.tar'
+     
+   
+    device = get_device(cuda_id)
+    model, preeval_func = load_model(model_path)
     model = model.to(device)
     #%%
     root_dir = Path('/Users/avelinojaver/Downloads/BBBC010_v1_images/')
     
-    for ifname, fname in enumerate(tqdm.tqdm(list(root_dir.glob('*.tif')))):
+    for ifname, fname in enumerate(tqdm.tqdm(list(root_dir.glob('*w2*.tif')))):
+        
         img = cv2.imread(str(fname), -1)
-        
-        bot, top = img.min(), img.max()
-        
-        img = (img.astype(np.float32)-bot)/(top-bot)
+        if ifname > 5:
+            break
+#        plt.figure()
+#        plt.imshow(img)
+           
+        img = (img/4095).astype(np.float32)
+        #bot, top = img.min(), img.max()
+        #img = (img.astype(np.float32)-bot)/(top-bot)
         #img = cv2.resize(img, dsize=(0,0), fx=1.25, fy=1.25)
         
         X = img[None, None]
@@ -66,15 +58,13 @@ if __name__ == '__main__':
             X = X.to(device)
             outs = model(X)
             cpm_maps_r, paf_maps_r = outs[-1]
+            cpm_maps_r = preeval_func(cpm_maps_r)
+            
         
+        cpm_map = cpm_maps_r[0].detach().cpu().numpy()
+        paf_maps = paf_maps_r[0].detach().cpu().numpy()
         
-        
-        cpm_map = cpm_maps_r[0]
-        
-        cpm_map = cpm_map.numpy()
-        
-        #TODO there is a bug in maps2skels if there is not enough trajectories. i need to correct it...
-        skeletons_r = maps2skels(cpm_map, threshold_abs = 0.05)
+        skels_pred =  maps2skels(cpm_map, paf_maps, _is_debug = False)
        
         
         mid = 24
@@ -84,11 +74,12 @@ if __name__ == '__main__':
         
         axs[0].imshow(cpm_map.max(axis=0))
         axs[1].imshow(img, cmap='gray')
-        for ss in skeletons_r:
+        for ss in skels_pred:
             plt.plot(ss[:, 0], ss[:, 1], '.-')
             plt.plot(ss[mid, 0], ss[mid, 1], 'o')
-            
-        if ifname > 0:
+        plt.suptitle(fname.name)     
+        
+        if ifname > 2:
             break
         #%%
         
