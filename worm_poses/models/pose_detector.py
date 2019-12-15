@@ -62,13 +62,20 @@ def get_loc_loss(loss_type):
 
 
 class BeliveMapsNMS(nn.Module):
-    def __init__(self, threshold_abs = 0.0, threshold_rel = None, min_distance = 3):
+    def __init__(self, 
+                 threshold_abs = 0.0, 
+                 threshold_rel = None, 
+                 min_distance = 3,
+                 max_num_peaks = 100):
         super().__init__()
         self.threshold_abs = threshold_abs
         self.threshold_rel = threshold_rel
         self.min_distance = min_distance
+        self.max_num_peaks = max_num_peaks
         
     def forward(self, belive_map):
+        B,S,H,W = belive_map.shape
+        
         kernel_size = 2 * self.min_distance + 1
         
         n_batch, n_channels, w, h = belive_map.shape
@@ -78,24 +85,116 @@ class BeliveMapsNMS(nn.Module):
         x_max = F.max_pool2d(belive_map, kernel_size, stride = 1, padding = kernel_size//2)
         x_mask = (x_max == belive_map) #nms using local maxima filtering
         
+        threshold_abs = self.threshold_abs
+        if threshold_abs == 0:
+            threshold_abs = 1/(H*W)*2
         
-        x_mask &= (belive_map > self.threshold_abs) 
+        x_mask &= (belive_map > threshold_abs) 
         if self.threshold_rel is not None:
             vmax = max_vals.view(n_batch, n_channels, 1, 1)
             x_mask &= (belive_map > self.threshold_rel*vmax)
         
-        
+            
         outputs = []
+        
         for xi, xm, xmax in zip(belive_map, x_mask, max_vals):
             ind = xm.nonzero()
-            scores_abs = xi[ind[:, 0], ind[:, 1], ind[:, 2]]
-            scores_rel = scores_abs/xmax[ind[:, 0]]
             
             skeletons = ind[:, [0, 2, 1]]
-            outputs.append((skeletons, scores_abs, scores_rel))
+            scores_abs = xi[ind[:, 0], ind[:, 1], ind[:, 2]]
+            
+            if ind.shape[0] > self.max_num_peaks*S:
+                #too many peaks, I need to reduce the size...
+                scores_abs_l = []
+                skeletons_l = []
+                for n_seg in range(S):
+                    valid = ind[:, 0] == n_seg
+                    vals, iis = torch.topk(scores_abs[valid], self.max_num_peaks)
+                    scores_abs_l.append(vals)
+                    skeletons_l.append(skeletons[valid][iis])
+                scores_abs = torch.cat(scores_abs_l)
+                skeletons = torch.cat(skeletons_l)
+                
+            outputs.append((skeletons, scores_abs))
         
         return outputs
-    
+
+class PAFWeighter(nn.Module):
+    def __init__(self, keypoint_max_dist = 20, n_segments = 8, PAF_seg_dist = 1):
+        super().__init__()
+        self.n_segments = n_segments
+        self.keypoint_max_dist = keypoint_max_dist
+        self.PAF_seg_dist = PAF_seg_dist
+        
+        
+    def forward(self, skeletons, PAF):
+        if not len(skeletons):
+            edges_indices = torch.zeros((0, 2), dtype = skeletons.dtype, device = skeletons.device)
+            edges_costs = torch.zeros((0, 2), dtype = torch.float, device = skeletons.device)
+            return edges_indices, edges_costs
+        
+        
+        n_affinity_maps, _, W, H = PAF.shape
+        
+        seg_inds = skeletons[:, 0]
+        skels_xy = skeletons[:, 1:]
+        
+        skels_inds = torch.arange(len(skeletons), device = PAF.device)
+        
+        points_grouped = []
+        for ii in range(self.n_segments):
+            good = seg_inds == ii
+            points_grouped.append((skels_inds[good], skels_xy[good]))
+        
+        edges = []
+        for i1 in range(n_affinity_maps):
+            
+            if i1 < n_affinity_maps - 1:
+                i2 = i1 + self.PAF_seg_dist
+            else:
+                i2 = i1 - max(1, self.PAF_seg_dist//2)
+            
+            
+            p1_ind, p1_l = points_grouped[i1]
+            p2_ind, p2_l = points_grouped[i2]
+            
+            n_p1 = len(p1_l)
+            n_p2 = len(p2_l)
+            
+            p1 = p1_l[None].repeat(n_p2, 1,  1)
+            p2 = p2_l[:, None].repeat(1, n_p1, 1)
+            midpoints = (p1 + p2)/2
+            
+            inds = torch.stack((p1, p2, midpoints))
+            paf_vals = PAF[i1][:, inds[..., 1], inds[..., 0]] 
+            
+            p1_f, p2_f = p1.float(), p2.float()
+            
+            target_v = (p2_f - p1_f)
+            R = (target_v**2).sum(dim=2).sqrt()
+            target_v.div_(R.unsqueeze(2))
+            target_v = target_v.permute((2, 0, 1))
+            
+            line_integral = (target_v.unsqueeze(1)*paf_vals).sum(dim=0).mean(dim=0)
+            
+            pairs = torch.nonzero(R < self.keypoint_max_dist, as_tuple=True)
+            paf_vals = line_integral[pairs[0], pairs[1]]
+            paf_vals[torch.isnan(paf_vals)] = 0
+            
+            R_vals = R[pairs[0], pairs[1]]
+            
+            points_pairs = torch.stack((p1_ind[pairs[1]], p2_ind[pairs[0]]))
+            costs = torch.stack((paf_vals, R_vals))
+            
+            edges.append((points_pairs, costs))
+         
+        edges_indices, edges_costs =  zip(*edges)
+        edges_indices = torch.cat(edges_indices, dim=1)
+        edges_costs = torch.cat(edges_costs, dim=1)
+        
+        
+        return edges_indices, edges_costs
+
     
 class PoseDetector(nn.Module):
     def __init__(self, 
@@ -107,12 +206,12 @@ class PoseDetector(nn.Module):
                  n_affinity_maps = 20,
                  features_type = 'vgg19',
                  
-                 nms_threshold_abs = 0.0,
-                 nms_threshold_rel = 0.2,
-                 nms_min_distance = 3,
+                 nms_threshold_abs = 0,
+                 nms_threshold_rel = 0.01,
+                 nms_min_distance = 1,
                  
-                 return_belive_maps = False
-                 
+                 return_belive_maps = False,
+                 max_poses = 100
                  ):
         
         
@@ -137,7 +236,11 @@ class PoseDetector(nn.Module):
         self.cpm_criterion, self.preevaluation = get_loc_loss(pose_loss_type)
         self.paf_criterion = nn.MSELoss()
         
-        self.nms = BeliveMapsNMS(nms_threshold_abs, nms_threshold_rel, nms_min_distance)
+        self.nms = BeliveMapsNMS(nms_threshold_abs, 
+                                 nms_threshold_rel, 
+                                 nms_min_distance,
+                                 max_poses)
+        self.paf_weigter = PAFWeighter(keypoint_max_dist = 20, n_segments = n_segments)
         
         self.return_belive_maps = return_belive_maps
     
@@ -168,20 +271,23 @@ class PoseDetector(nn.Module):
             outputs.append(loss)
         
         if not self.training:
-            xhat = self.preevaluation(pose_map)
-            result = {}
-#            outs = self.nms(xhat)
-#            
-#            result = []
-#            for skeletons, scores_abs, scores_rel in outs:
-#                
-#                result.append(
-#                    dict(
-#                        skeletons = skeletons,
-#                        scores_abs = scores_abs,
-#                        scores_rel = scores_rel
-#                        )
-#                    )
+            xhat = self.preevaluation(pose_map.detach())
+            
+            outs = self.nms(xhat.detach())
+            
+            result = []
+            for (skeletons, scores_abs), PAF in zip(outs, PAFs):
+                edges_indices, edges_costs = self.paf_weigter(skeletons, PAF)
+                #edges_indices, edges_costs = [], [] 
+                
+                result.append(
+                    dict(
+                        skeletons =  skeletons,
+                        scores_abs = scores_abs,
+                        edges_indices = edges_indices,
+                        edges_costs = edges_costs
+                        )
+                    )
             outputs.append(result)
 
         if self.return_belive_maps:
@@ -191,5 +297,9 @@ class PoseDetector(nn.Module):
             outputs = outputs[0]
         
         return outputs
+    
+    #%%
+    
+    
     
     

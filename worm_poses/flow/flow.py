@@ -127,6 +127,7 @@ class SkelMapsFlow(Dataset):
                  n_segments = 49,
                  
                  return_bboxes = False,
+                 return_half_bboxes = False,
                  return_key_value_pairs = True
                  ):
         
@@ -139,6 +140,7 @@ class SkelMapsFlow(Dataset):
         self.scale_int = scale_int
         
         self.return_bboxes = return_bboxes
+        self.return_half_bboxes = return_half_bboxes
         
         self.fold_skeleton = fold_skeleton
         self.PAF_seg_dist = PAF_seg_dist
@@ -277,6 +279,9 @@ class SkelMapsFlow(Dataset):
         
         if self.return_bboxes:
             target_out = self.skels2bboxes(skels, widths)
+            
+        elif self.return_half_bboxes:
+            target_out = self.skels2halfbboxes(skels, widths)
         else:
             target_out = self.skels2PAFs(skels, widths)
         
@@ -309,8 +314,8 @@ class SkelMapsFlow(Dataset):
         target = dict(skels = skels, PAF = PAF)
         return target
     
-    
-    def skels2bboxes(self, skels, widths):
+    @staticmethod
+    def _skels2bboxes(skels, widths, roi_size, fold_skeleton):
         skels = skels.astype(np.float32)
         
         gap = np.ceil(np.max(widths/2, axis=1))[..., None]
@@ -319,7 +324,7 @@ class SkelMapsFlow(Dataset):
         bbox_l[bbox_l<0] = 0
         
         bbox_r = skels.max(axis = 1) + gap
-        s = self.roi_size-1
+        s = roi_size-1
         bbox_r[bbox_r>s] = s
         
         bboxes = np.concatenate((bbox_l, bbox_r), axis = 1)
@@ -327,7 +332,7 @@ class SkelMapsFlow(Dataset):
         
         keypoints = []
         
-        mid = self.n_segments//2
+        
         for bbox in bboxes:
             inside = (skels[...,0] >= bbox[0] ) & (skels[...,0] <= bbox[2])
             inside &= (skels[...,1] >= bbox[1] ) & (skels[...,1] <= bbox[3])
@@ -335,10 +340,10 @@ class SkelMapsFlow(Dataset):
             in_cluster = inside.mean(axis=1) >= 0.95
             skels_in = skels[in_cluster]
             
-            if self.fold_skeleton:
+            if fold_skeleton:
+                mid = skels_in.shape[1]//2
                 skels_in = np.concatenate((skels_in[:, :mid+1], skels_in[:, :mid-1:-1]))
             keypoints.append(skels_in)
-        
         labels = np.ones(len(bboxes), np.float32)
         
         target = dict(
@@ -346,10 +351,20 @@ class SkelMapsFlow(Dataset):
             labels = labels,
             keypoints = keypoints
             )
-        
-        
         return target
     
+    def skels2bboxes(self, skels, widths):
+        return self._skels2bboxes(skels, widths, self.roi_size, self.fold_skeleton)
+        
+    
+    def skels2halfbboxes(self, skels, widths):
+        mid = self.n_segments//2
+        
+        skels = np.concatenate((skels[:, :mid+1], skels[:, :mid-1:-1]))
+        widths = np.concatenate((widths[:, :mid+1], widths[:, :mid-1:-1]))
+        
+        return self._skels2bboxes(skels, widths, self.roi_size, False)
+        
     def __len__(self):
         return self.samples_per_epoch
 
@@ -394,14 +409,14 @@ if __name__ == '__main__':
     
     root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/'
     root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/'
-    
-    argkws = dict(PAF_seg_dist = 2, n_segments = 17)
+    #%%
+    argkws = dict(PAF_seg_dist = 1, n_segments = 15)
     
     gen = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, **argkws)
     gen_val = SkelMapsFlowValidation(root_dir = root_dir, return_key_value_pairs = False, **argkws)
     
     gen_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_bboxes = True)
-    
+    gen_half_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_half_bboxes = True)
     #%%
     for ind in range(5):
         image, target = gen._get_random_worm()
@@ -445,12 +460,54 @@ if __name__ == '__main__':
         
         for skel in target['skels']:
             axs[1].plot(skel[:, 0], skel[:, 1], '.-')
-            
+    #%%
+    skels = target['skels'].detach().numpy()
+    for ii, paf in enumerate(target['PAF']):
+        fig, axs = plt.subplots(1, 2)
+        axs[1].imshow(np.linalg.norm(paf, axis = 0))
+        
+        if ii < gen.n_affinity_maps_out - 1:
+            s1 = skels[:, ii]
+            s2 = skels[:, ii + gen.PAF_seg_dist]
+        else:
+            mid = len(skels)//2
+            ind = max(2, gen.PAF_seg_dist //2 + 1)
+            s1 = skels[:mid, -ind]
+            s2 = skels[mid:, -ind]
+        
+        sx = (s1[:, 0], s2[:, 0])
+        sy = (s1[:, 1], s2[:, 1])
+        
+        axs[0].imshow(img, cmap = 'gray')
+        
+        for ax in axs:
+            ax.plot(sx, sy, 'r.-')
+    
         #%%
                 
     for ind in tqdm.trange(5):
         image, target = gen_boxes._build_rand_img()
         image, target = gen_boxes._prepare_output(image, target)
+        
+        img = image[0]
+        fig, ax = plt.subplots(1,1)
+        ax.imshow(img, cmap = 'gray')
+        
+        
+        for bbox, ss in zip(target['boxes'], target['keypoints']):
+                
+            xmin, ymin, xmax, ymax = bbox
+            ww = xmax - xmin + 1
+            hh = ymax - ymin + 1
+            rect = patches.Rectangle((xmin, ymin),ww,hh,linewidth=1,edgecolor='r',facecolor='none')
+            ax.add_patch(rect)
+            
+            for s in ss:
+                plt.plot(s[:, 0], s[:, 1])
+    #%%        
+    for ind in tqdm.trange(5):
+        image, target = gen_half_boxes._build_rand_img()
+        image, target = gen_half_boxes._prepare_output(image, target)
         
         img = image[0]
         fig, ax = plt.subplots(1,1)

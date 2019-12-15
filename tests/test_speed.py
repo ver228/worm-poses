@@ -19,12 +19,14 @@ import tqdm
 import multiprocessing as mp
 
 from worm_poses.utils import get_device
-from worm_poses.models.detection_torch import fasterrcnn_resnet50_fpn, keypointrcnn_resnet50_fpn
+from worm_poses.models import get_keypointrcnn
 
 def _prepare_batch(batch):
     frames, X = map(np.array, zip(*batch))
     X = X.astype(np.float32)/255.
-    X = np.repeat(X[:, None], 3, axis=1)
+    X = X[:, None]
+    #X = np.repeat(X, 3, axis=1)
+    X 
     X = torch.from_numpy(X)
     return frames, X
     
@@ -52,10 +54,7 @@ def read_images_proc(mask_file, batch_size, queue):
 
 
 if __name__ == '__main__':
-    
-    #bn = 'detection-singles_fasterrcnn_20190628_174616_adam_lr0.0001_wd0.0_batch16'
-    bn = 'detection-singles_keypointrcnn_20190703_085950_adam_lr0.0001_wd0.0_batch8'
-    
+    bn = 'v2+boxes_keypointrcnn+resnet18_maxlikelihood_20191210_220905_adam_lr0.0001_wd0.0_batch14'
     set_type = bn.partition('_')[0]
     model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'checkpoint.pth.tar'
     
@@ -66,27 +65,16 @@ if __name__ == '__main__':
     state = torch.load(model_path, map_location = 'cpu')
     #%%
     
+    if 'resnet18' in bn:
+        backbone = 'resnet18' 
+    elif 'resnet50' in bn:
+        backbone = 'resnet50' 
     
-    roi_size = 2048
-    if 'keypointrcnn' in bn:
-        model = keypointrcnn_resnet50_fpn(
-                                        num_classes = 2, 
-                                        num_keypoints = 25,
-                                        min_size = roi_size,
-                                        max_size = roi_size,
-                                        image_mean = [0., 0., 0.],
-                                        image_std = [1., 1., 1.], 
-                                        pretrained = False
-                                        )
-    elif 'fasterrcnn' in bn:
-        model = fasterrcnn_resnet50_fpn(
-                                    num_classes = 2, 
-                                    min_size = roi_size,
-                                    max_size = roi_size,
-                                    image_mean = [0, 0, 0],
-                                    image_std = [1., 1., 1.],
-                                    pretrained = False
-                                    )
+    
+    model = get_keypointrcnn(backbone = backbone,
+                                 num_classes = 2, 
+                                 num_keypoints = 25
+                                 )
     
     model.load_state_dict(state['state_dict'])
     model.eval()
@@ -100,19 +88,17 @@ if __name__ == '__main__':
                           )
     reader_p.daemon = True
     reader_p.start()        # Launch reader_proc() as a separate python process
-
-        
     
-    
-    while True:
-        dat = pqueue.get()
-        if dat is None:
-            break
-        frames, X = dat
-        
-        with torch.no_grad():
+    with torch.no_grad():
+        while True:
+            dat = pqueue.get()
+            if dat is None:
+                break
+            frames, X = dat
             X = X.to(device)
             predictions = model(X)
+            
+            
             
             #preditions = [{k:v.detach().cpu().numpy() for k,v in p.items()} for p in predictions]
                 

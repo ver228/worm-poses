@@ -97,7 +97,8 @@ def _get_segment_vectors(skel, width, roi_shape, seg_dist = 6, dst_array = None)
     ind = np.arange(skel.shape[0] - seg_dist - 1, midbody_ind - 1, -1)
     inds_r = np.stack((ind + seg_dist, ind)).T[::-1]
     
-    inds_c = [(midbody_ind - seg_dist//2, midbody_ind + seg_dist//2)]
+    ind = max(seg_dist//2, 1)
+    inds_c = [(midbody_ind - ind, midbody_ind + ind)]
     
     
     tot_maps = len(inds_l) + len(inds_r) + len(inds_c)
@@ -144,7 +145,9 @@ def get_part_affinity_maps(skels,
         affinity_maps_folded[bad] = affinity_maps_folded[bad]/2
         
         affinity_maps = np.concatenate((affinity_maps_folded, affinity_maps[mid][None]))
-    
+        
+        
+        
     assert not np.any(np.isnan(affinity_maps))
     
     return affinity_maps

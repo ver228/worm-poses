@@ -13,19 +13,21 @@ sys.path.append(str(root_dir))
 
 import tables
 import torch
-from worm_poses.trainer import get_device
+from worm_poses.utils import get_device
 
-from worm_poses.models.detection_torch import fasterrcnn_resnet50_fpn, keypointrcnn_resnet50_fpn
-
+from worm_poses.models import get_keypointrcnn
 
 if __name__ == '__main__':
     import matplotlib.pylab as plt
     import numpy as np
     from matplotlib import patches
     
-    #bn = 'detection-singles_fasterrcnn_20190628_174616_adam_lr0.0001_wd0.0_batch16'
+    bn = 'v2+boxes_keypointrcnn+resnet18_maxlikelihood_20191210_220905_adam_lr0.0001_wd0.0_batch14'
+    #bn = 'v2+boxes_keypointrcnn+resnet50_maxlikelihood_20191210_221004_adam_lr0.0001_wd0.0_batch14'
+    #bn = 'v2+boxes_keypointrcnn+resnet18_maxlikelihood_20191211_150643_adam_lr0.0001_wd0.0_batch28'
     
-    bn = 'v2_openpose_maxlikelihood_20191209_093737_adam_lr0.0001_wd0.0_batch20'
+    #bn = 'v2+halfboxes_keypointrcnn+resnet18_maxlikelihood_20191212_142009_adam_lr0.0001_wd0.0_batch12'
+    
     set_type = bn.partition('_')[0]
     model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'checkpoint.pth.tar'
     
@@ -35,25 +37,16 @@ if __name__ == '__main__':
     state = torch.load(model_path, map_location = 'cpu')
     #%%
     roi_size = 2048
-    if 'keypointrcnn' in bn:
-        model = keypointrcnn_resnet50_fpn(
-                                        num_classes = 2, 
-                                        num_keypoints = 25,
-                                        min_size = roi_size,
-                                        max_size = roi_size,
-                                        image_mean = [0., 0., 0.],
-                                        image_std = [1., 1., 1.], 
-                                        pretrained = False
-                                        )
-    elif 'fasterrcnn' in bn:
-        model = fasterrcnn_resnet50_fpn(
-                                    num_classes = 2, 
-                                    min_size = roi_size,
-                                    max_size = roi_size,
-                                    image_mean = [0, 0, 0],
-                                    image_std = [1., 1., 1.],
-                                    pretrained = False
-                                    )
+    if 'resnet18' in bn:
+        backbone = 'resnet18' 
+    elif 'resnet50' in bn:
+        backbone = 'resnet50' 
+    
+    
+    model = get_keypointrcnn(backbone = backbone,
+                                 num_classes = 2, 
+                                 num_keypoints = 25
+                                 )
     
     model.load_state_dict(state['state_dict'])
     model.eval()
@@ -74,7 +67,9 @@ if __name__ == '__main__':
         
         img = img.astype(np.float32)/255.
         
-        X = torch.from_numpy(np.repeat(img[None], 3, axis=0)).float()[None]
+        #X = torch.from_numpy(np.repeat(img[None], 3, axis=0)).float()[None]
+        X = torch.from_numpy(img[None]).float()[None]
+        
         predictions = model(X)
         
         
@@ -96,9 +91,8 @@ if __name__ == '__main__':
             y = (ymin + ymax)/2
             s = str(lab.item())
             ax.text(x, y, s, color='cyan', fontsize=12)
-            #%%
             
-            
+        #%%
         if 'keypoints' in preds:
             maps = preds['keypoints']
             bboxes = preds['boxes']

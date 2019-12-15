@@ -42,8 +42,6 @@ flow_args = dict(
                  int_offset_range = (-0.2, 0.2),
                  blank_patch_range = (1/8, 1/3),
                  zoom_range = None,
-                 
-                 
             )
 
     #%%
@@ -57,8 +55,8 @@ available_models = {
             features_type = 'vgg19'
         ),
     'openpose+light'  : dict(
-            PAF_seg_dist = 2,
-            n_segments = 17,
+            PAF_seg_dist = 1,
+            n_segments = 15,
             n_stages = 4,
             features_type = 'vgg11'
         ),
@@ -96,7 +94,15 @@ def train_PAF(
     
     log_dir = log_dir_root / data_type
     
-    return_bboxes = False if 'openpose' in model_name else True
+    
+    return_bboxes = False
+    return_half_bboxes = False
+    if not 'openpose' in model_name:
+        if 'halfboxes' in data_type:
+            return_half_bboxes = True
+        else:
+            return_bboxes = True
+            
     
     model_args = available_models[model_name]
     train_flow = SkelMapsFlow(root_dir = root_dir, 
@@ -107,6 +113,7 @@ def train_PAF(
                              PAF_seg_dist = model_args['PAF_seg_dist'],
                              n_segments = model_args['n_segments'],
                              return_bboxes = return_bboxes,
+                             return_half_bboxes = return_half_bboxes,
                              **flow_args
                              )
 
@@ -116,6 +123,7 @@ def train_PAF(
                              PAF_seg_dist = model_args['PAF_seg_dist'],
                              n_segments = model_args['n_segments'],
                              return_bboxes = return_bboxes,
+                             return_half_bboxes = return_half_bboxes,
                              **flow_args
                              )
     

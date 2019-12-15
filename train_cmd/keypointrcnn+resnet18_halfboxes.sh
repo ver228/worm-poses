@@ -12,7 +12,7 @@ echo cuda_id: $CUDA_VISIBLE_DEVICES
 SCRIPTPATH="$HOME/GitLab/worm-poses/scripts/train_PAF.py" 
 python -W ignore $SCRIPTPATH \
 --n_epochs 1000 \
---data_type 'v2+boxes' \
+--data_type 'v2+halfboxes' \
 --model_name 'keypointrcnn+resnet18' \
 --loss_type 'maxlikelihood' \
 --batch_size 28 \

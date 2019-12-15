@@ -68,6 +68,12 @@ if __name__ == '__main__':
     
     fnames = ['/Users/avelinojaver/workspace/WormData/screenings/pesticides_adam/Syngenta/MaskedVideos/test_SYN_001_Agar_Screening_310317/N2_worms10_food1-3_Set2_Pos4_Ch5_31032017_220113.hdf5',
               '/Users/avelinojaver/OneDrive - Imperial College London/tierpsy_examples/aggregation/N2_1_Ch1_29062017_182108_comp3.hdf5']
+    
+    fnames = [Path.home() / 'workspace/WormData/screenings/mating_videos/Mating_Assay/Mating_Assay_030718/MaskedVideos/Set1_CB369_CB1490/Set1_CB369_CB1490_Ch1_03072018_163429.hdf5',
+             Path.home() / 'workspace/WormData/screenings/mating_videos/Mating_Assay/Mating_Assay/Mating_Assay_030718/MaskedVideos/Set1_CB369_CB1490/Set1_CB369_CB1490_Ch1_03072018_163429.hdf5'
+             ]
+    
+    
     for mask_file in fnames:
         mask_file = Path(mask_file)
         with tables.File(mask_file, 'r') as fid:
@@ -79,7 +85,7 @@ if __name__ == '__main__':
         predictions = model(X)
         
         
-        #%%
+        
         fig, ax = plt.subplots(1,1)
         ax.imshow(img, cmap='gray')
         
@@ -97,7 +103,7 @@ if __name__ == '__main__':
             y = (ymin + ymax)/2
             s = str(lab.item())
             ax.text(x, y, s, color='cyan', fontsize=12)
-            #%%
+            
             
             
         if 'keypoints' in preds:
