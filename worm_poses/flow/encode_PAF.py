@@ -83,7 +83,7 @@ def _inds2segment(inds,
                 
     return dst_array
 
-def _get_segment_vectors(skel, width, roi_shape, seg_dist = 6, dst_array = None):
+def _get_segment_vectors_folded(skel, width, roi_shape, seg_dist = 6, dst_array = None):
     
     cnt_side1, cnt_side2 = _skel2cnt(skel, width)
     
@@ -119,6 +119,13 @@ def _get_segment_vectors(skel, width, roi_shape, seg_dist = 6, dst_array = None)
     
     return dst_array
 
+def _get_segment_vectors_straight(skel, width, roi_shape, seg_dist = 6, dst_array = None):
+    cnt_side1, cnt_side2 = _skel2cnt(skel, width)
+    ind = np.arange(0, skel.shape[0] - seg_dist)
+    inds = np.stack((ind, ind + seg_dist)).T
+    
+    return _inds2segment(inds, roi_shape, skel, cnt_side1, cnt_side2, dst_array = dst_array)
+
 def get_part_affinity_maps(skels, 
                            widths, 
                            roi_shape, 
@@ -127,14 +134,18 @@ def get_part_affinity_maps(skels,
                            ):
     
     n_segments = skels.shape[1]
-    n_affinity_maps = 2*(n_segments//2 - seg_dist + 1) + 1
     
-    affinity_maps = np.zeros((n_affinity_maps, 2, *roi_shape), dtype = np.float32)
     
-    for skel, width in zip(skels, widths):
-        _get_segment_vectors(skel, width, roi_shape, seg_dist = seg_dist, dst_array = affinity_maps)
+    
     
     if fold_skeleton:
+        
+        n_affinity_maps = 2*(n_segments//2 - seg_dist + 1) + 1
+        affinity_maps = np.zeros((n_affinity_maps, 2, *roi_shape), dtype = np.float32)
+        
+        for skel, width in zip(skels, widths):
+            _get_segment_vectors_folded(skel, width, roi_shape, seg_dist = seg_dist, dst_array = affinity_maps)
+    
         mid = affinity_maps.shape[0]//2
         p1, p2 = affinity_maps[:mid], affinity_maps[mid+1:][::-1]
         
@@ -145,7 +156,13 @@ def get_part_affinity_maps(skels,
         affinity_maps_folded[bad] = affinity_maps_folded[bad]/2
         
         affinity_maps = np.concatenate((affinity_maps_folded, affinity_maps[mid][None]))
+    else:
         
+        n_affinity_maps = n_segments - seg_dist
+        affinity_maps = np.zeros((n_affinity_maps, 2, *roi_shape), dtype = np.float32)
+        
+        for skel, width in zip(skels, widths):
+            _get_segment_vectors_straight(skel, width, roi_shape, seg_dist = seg_dist, dst_array = affinity_maps)
         
         
     assert not np.any(np.isnan(affinity_maps))

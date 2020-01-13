@@ -7,7 +7,7 @@ Created on Fri Dec  6 18:20:23 2019
 """
 
 from .openpose import OpenPoseCPM
-from .losses import MaximumLikelihoodLoss, LossWithBeliveMaps
+from .losses import MaximumLikelihoodLoss, LossWithBeliveMaps, SymetricMLELoss, SymetricPAFLoss
 
 
 import torch
@@ -27,6 +27,12 @@ def get_loc_loss(loss_type):
     if loss_type == 'maxlikelihood':
         criterion = MaximumLikelihoodLoss()
         preevaluation = _normalize_softmax
+    
+    elif loss_type == 'maxlikelihood+symetric':
+        criterion = SymetricMLELoss()
+        preevaluation = _normalize_softmax
+        
+    
     else:
         parts = loss_type.split('-')
         loss_t = parts[0]
@@ -54,19 +60,18 @@ def get_loc_loss(loss_type):
                                        gauss_sigma = gauss_sigma, 
                                        is_regularized = is_regularized,
                                        increase_factor = increase_factor
-                                       )
-    
+                                       )    
     if criterion is None:
         raise ValueError(loss_type)
     return criterion, preevaluation
-
 
 class BeliveMapsNMS(nn.Module):
     def __init__(self, 
                  threshold_abs = 0.0, 
                  threshold_rel = None, 
                  min_distance = 3,
-                 max_num_peaks = 100):
+                 max_num_peaks = 100
+                 ):
         super().__init__()
         self.threshold_abs = threshold_abs
         self.threshold_rel = threshold_rel
@@ -84,6 +89,7 @@ class BeliveMapsNMS(nn.Module):
         
         x_max = F.max_pool2d(belive_map, kernel_size, stride = 1, padding = kernel_size//2)
         x_mask = (x_max == belive_map) #nms using local maxima filtering
+        
         
         threshold_abs = self.threshold_abs
         if threshold_abs == 0:
@@ -109,9 +115,12 @@ class BeliveMapsNMS(nn.Module):
                 skeletons_l = []
                 for n_seg in range(S):
                     valid = ind[:, 0] == n_seg
-                    vals, iis = torch.topk(scores_abs[valid], self.max_num_peaks)
-                    scores_abs_l.append(vals)
-                    skeletons_l.append(skeletons[valid][iis])
+                    _scores = scores_abs[valid]
+                    n_valid = len(_scores)
+                    if n_valid:
+                        vals, iis = torch.topk(_scores, min(self.max_num_peaks, n_valid))
+                        scores_abs_l.append(vals)
+                        skeletons_l.append(skeletons[valid][iis])
                 scores_abs = torch.cat(scores_abs_l)
                 skeletons = torch.cat(skeletons_l)
                 
@@ -210,6 +219,7 @@ class PoseDetector(nn.Module):
                  nms_threshold_rel = 0.01,
                  nms_min_distance = 1,
                  
+                 use_head_loss = False,
                  return_belive_maps = False,
                  max_poses = 100
                  ):
@@ -223,27 +233,34 @@ class PoseDetector(nn.Module):
         self.nms_min_distance = nms_min_distance
         
         self.pose_loss_type = pose_loss_type
+        self.n_segments = n_segments
+        self.n_stages = n_stages
+        self.n_affinity_maps = n_affinity_maps
+        self.features_type = features_type
         
+        self.use_head_loss = use_head_loss
         self._input_names = list(set(dir(self)) - _dum) #i want the name of this fields so i can access them if necessary
+        
+        n_outs = n_segments + 1 if use_head_loss else n_segments
         
         self.mapping_network = OpenPoseCPM(n_inputs = n_inputs,
                              n_stages = n_stages, 
-                             n_segments = n_segments,
+                             n_segments = n_outs,
                              n_affinity_maps = n_affinity_maps,
                              features_type = features_type
                              )
         
         self.cpm_criterion, self.preevaluation = get_loc_loss(pose_loss_type)
-        self.paf_criterion = nn.MSELoss()
+        self.paf_criterion = SymetricPAFLoss()  if 'symetric' in pose_loss_type else nn.MSELoss()
         
         self.nms = BeliveMapsNMS(nms_threshold_abs, 
                                  nms_threshold_rel, 
                                  nms_min_distance,
                                  max_poses)
-        self.paf_weigter = PAFWeighter(keypoint_max_dist = 20, n_segments = n_segments)
+        self.paf_weighter = PAFWeighter(keypoint_max_dist = 20, n_segments = n_segments)
         
         self.return_belive_maps = return_belive_maps
-    
+        
     
     @property
     def input_parameters(self):
@@ -256,7 +273,14 @@ class PoseDetector(nn.Module):
         outputs = []
         
         if targets is not None:
-            cpm_loss = self.cpm_criterion(pose_map, targets)
+            skel_targets = [t['skels'] for t in targets]
+            skel_maps = pose_map[:, :self.n_segments]
+            
+            if 'symetric' in self.pose_loss_type:
+                is_valid_ht_targets = [t['is_valid_ht'] for t in targets]
+                cpm_loss = self.cpm_criterion(skel_maps, skel_targets, is_valid_ht = is_valid_ht_targets)
+            else:
+                cpm_loss = self.cpm_criterion(skel_maps, skel_targets)
             
             target_PAFs = torch.stack([t['PAF'] for t in targets])
             if self.training:
@@ -268,6 +292,17 @@ class PoseDetector(nn.Module):
                 cpm_loss = cpm_loss,
                 paf_loss = paf_loss
                 )
+            
+            if self.use_head_loss:
+                head_targets = [t['heads'].unsqueeze(1) for t in targets if t['heads'].shape[0]>0]
+                
+                _valid = [t['heads'].shape[0]>0 for t in targets]
+                cpm_heads = pose_map[_valid, self.n_segments:]
+                
+                assert cpm_heads.shape[0] == len(head_targets)
+                if head_targets:
+                    loss['cpm_head_loss'] = self.cpm_criterion(cpm_heads, head_targets)
+            
             outputs.append(loss)
         
         if not self.training:
@@ -277,8 +312,13 @@ class PoseDetector(nn.Module):
             
             result = []
             for (skeletons, scores_abs), PAF in zip(outs, PAFs):
-                edges_indices, edges_costs = self.paf_weigter(skeletons, PAF)
+                edges_indices, edges_costs = self.paf_weighter(skeletons, PAF)
                 #edges_indices, edges_costs = [], [] 
+                
+                if all(edges_indices.size()) and (edges_indices.max() > skeletons.shape[0]):
+                    import pdb
+                    pdb.set_trace()
+                
                 
                 result.append(
                     dict(

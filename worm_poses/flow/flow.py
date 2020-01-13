@@ -92,8 +92,11 @@ def get_outputs_sizes(n_segments, PAF_seg_dist, fold_skeleton):
     n_segments_out = n_segments // 2 + 1 if fold_skeleton else n_segments
     
     if PAF_seg_dist:
-        n_affinity_maps = 2*(n_segments//2 - PAF_seg_dist + 1) + 1
-        n_affinity_maps_out = n_affinity_maps // 2 + 1 if fold_skeleton else n_affinity_maps
+        if fold_skeleton:
+            n_affinity_maps_out = (2*(n_segments//2 - PAF_seg_dist + 1) + 1)//2 + 1
+        else:
+            n_affinity_maps_out = n_segments - PAF_seg_dist
+        
     else:
         n_affinity_maps_out = None
     
@@ -103,7 +106,7 @@ def get_outputs_sizes(n_segments, PAF_seg_dist, fold_skeleton):
 
 class SkelMapsFlow(Dataset):
     _valid_headtail = ['from_tierpsy']
-    
+    _head_ind = 2
     def __init__(self, 
                  root_dir, 
                  set2read = 'validation',
@@ -192,6 +195,16 @@ class SkelMapsFlow(Dataset):
     def input_parameters(self):
         return {x:getattr(self, x) for x in self._input_names}
     
+    
+    
+    def _get_head_coords(self, skels, is_valid_ht):
+        if isinstance(is_valid_ht, bool):
+            is_valid_ht = np.array([is_valid_ht]*len(skels))
+        head_coords = skels[:, self._head_ind].copy()
+        head_coords[~is_valid_ht] = -1
+        
+        return head_coords, is_valid_ht
+    
     def _get_random_worm(self):
         k, ii = random.choice(self.data_indexes)
         raw_data = self.data[k][ii]
@@ -202,12 +215,16 @@ class SkelMapsFlow(Dataset):
             image = raw_data['roi_mask'] if random.random() >= 0.5 else raw_data['roi_full']
         target = {k:raw_data[k] for k in ('widths', 'skels')}
         
-        #I am assuming 'from_tierpsy' has the correct head/tail orientation so anyting else will be randomly switched
-        if not k in self._valid_headtail: 
+        
+        #I am assuming 'from_tierpsy' has the correct head/tail orientation 
+        is_valid_ht = k in self._valid_headtail
+        if not is_valid_ht: 
+            #If we don't know the correct orientation let's randomly switch so anyting else will be randomly switched
             if random.random() > 0.5:
                 target['skels'] = target['skels'][:, ::-1] 
         
         image, target = self.transforms_worm(image, target)
+        target['is_valid_ht'] = is_valid_ht 
         
         return image, target
     
@@ -237,7 +254,7 @@ class SkelMapsFlow(Dataset):
     
     def _build_rand_img(self):
         img = np.zeros((self.roi_size, self.roi_size), np.float32)
-        target = {'skels' : [], 'widths' : []}
+        target = {'skels' : [], 'widths' : [], 'is_valid_ht' : []}
         
         n_rois = random.randint(*self.n_rois_lims)
         while n_rois > 0:
@@ -251,7 +268,11 @@ class SkelMapsFlow(Dataset):
                 corner = np.array(corner)[None, None]
                 target['skels'].append(corner + roi_target['skels'])
                 target['widths'].append(roi_target['widths'])
+                target['is_valid_ht'].append(roi_target['is_valid_ht'])
+        
+        target['is_valid_ht'] = [np.array([is_ht]*len(s)) for s, is_ht in zip(target['skels'], target['is_valid_ht'])]
         target = {k : np.concatenate(v) for k, v in target.items()}
+        assert target['skels'].shape[0] == target['is_valid_ht'].shape[0]
         
         
         if self.data_negative is not None:
@@ -262,11 +283,15 @@ class SkelMapsFlow(Dataset):
                 corner = self._randomly_locate_roi(img, roi)
         
         return img, target
+    
+    
         
     def _prepare_output(self, image, target):
         
         skels = target['skels']
         widths = target['widths']
+        is_valid_ht = target['is_valid_ht']
+        
         widths[widths<1] = 1 #clip to have at lest one of width
         
         if skels.shape[1] != self.n_segments:
@@ -276,14 +301,23 @@ class SkelMapsFlow(Dataset):
         
         skels = skels.round()
         skels = np.clip(skels, 0, self.roi_size-1) #ensure the skeletons are always in the image limits
+        heads, is_valid_ht = self._get_head_coords(skels, is_valid_ht)
+        if self.fold_skeleton:
+            heads = np.concatenate((heads, -np.ones_like(heads)))
+        
         
         if self.return_bboxes:
             target_out = self.skels2bboxes(skels, widths)
-            
         elif self.return_half_bboxes:
             target_out = self.skels2halfbboxes(skels, widths)
         else:
             target_out = self.skels2PAFs(skels, widths)
+            heads = heads[heads[:, 0]>=0]
+        
+        target_out['heads'] = heads
+        
+        if not self.fold_skeleton:
+            target_out['is_valid_ht'] = is_valid_ht
         
         image_out = np.clip(image, 0, 1)[None]
         image_out, target_out = self.to_tensor(image_out, target_out)
@@ -390,6 +424,8 @@ class SkelMapsFlowValidation(SkelMapsFlow):
         image = raw_data['roi_mask']
         target = {k:raw_data[k] for k in ('widths', 'skels')}
         
+        target['is_valid_ht'] = k in self._valid_headtail
+        
         image, target = self.transforms_full(image, target)
         return image, target
     
@@ -407,10 +443,12 @@ if __name__ == '__main__':
     import matplotlib.pylab as plt
     from matplotlib import patches
     
+    
     root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/'
     root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/'
     #%%
-    argkws = dict(PAF_seg_dist = 1, n_segments = 15)
+    #argkws = dict(PAF_seg_dist = 1, n_segments = 15)
+    argkws = dict(PAF_seg_dist = 1, n_segments = 15, fold_skeleton = False)
     
     gen = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, **argkws)
     gen_val = SkelMapsFlowValidation(root_dir = root_dir, return_key_value_pairs = False, **argkws)
@@ -450,7 +488,7 @@ if __name__ == '__main__':
         pafs_tail = pafs_abs[-1]
         pafs_max = pafs_abs.max(axis=0)
         
-        fig, axs = plt.subplots(1,5, sharex = True, sharey = True)
+        fig, axs = plt.subplots(1,5, figsize = (15, 5), sharex = True, sharey = True)
         axs[0].imshow(img, cmap = 'gray')
         axs[1].imshow(img, cmap = 'gray')
         axs[2].imshow(pafs_head)
@@ -460,13 +498,25 @@ if __name__ == '__main__':
         
         for skel in target['skels']:
             axs[1].plot(skel[:, 0], skel[:, 1], '.-')
+        
+        p = target['heads']
+        p = p[p[:, 0]>=0] 
+        axs[1].plot(p[:, 0], p[:, 1], 'or')
+        
     #%%
     skels = target['skels'].detach().numpy()
-    for ii, paf in enumerate(target['PAF']):
+    
+    PAF_switched = -torch.flip(target['PAF'], dims = (0,))
+    PAF = target['PAF']
+    #%%
+    for ii, paf in enumerate(PAF):
         fig, axs = plt.subplots(1, 2)
+        axs[0].imshow(img, cmap = 'gray')
         axs[1].imshow(np.linalg.norm(paf, axis = 0))
         
-        if ii < gen.n_affinity_maps_out - 1:
+        
+        #if gen.fold_skeleton:
+        if (ii < gen.n_affinity_maps_out - 1) or not gen.fold_skeleton:
             s1 = skels[:, ii]
             s2 = skels[:, ii + gen.PAF_seg_dist]
         else:
@@ -474,15 +524,15 @@ if __name__ == '__main__':
             ind = max(2, gen.PAF_seg_dist //2 + 1)
             s1 = skels[:mid, -ind]
             s2 = skels[mid:, -ind]
-        
+                
+                
         sx = (s1[:, 0], s2[:, 0])
         sy = (s1[:, 1], s2[:, 1])
         
-        axs[0].imshow(img, cmap = 'gray')
-        
         for ax in axs:
             ax.plot(sx, sy, 'r.-')
-    
+        
+        
         #%%
                 
     for ind in tqdm.trange(5):
@@ -490,11 +540,10 @@ if __name__ == '__main__':
         image, target = gen_boxes._prepare_output(image, target)
         
         img = image[0]
-        fig, ax = plt.subplots(1,1)
+        fig, ax = plt.subplots(1, 1, figsize = (10, 10))
         ax.imshow(img, cmap = 'gray')
         
-        
-        for bbox, ss in zip(target['boxes'], target['keypoints']):
+        for bbox, ss, p in zip(target['boxes'], target['keypoints'], target['heads']):
                 
             xmin, ymin, xmax, ymax = bbox
             ww = xmax - xmin + 1
@@ -504,6 +553,10 @@ if __name__ == '__main__':
             
             for s in ss:
                 plt.plot(s[:, 0], s[:, 1])
+            
+            if p[0] >= 0:
+                plt.plot(p[0], p[1], 'or')
+             
     #%%        
     for ind in tqdm.trange(5):
         image, target = gen_half_boxes._build_rand_img()
@@ -540,4 +593,6 @@ if __name__ == '__main__':
         for skel in target['skels']:
             axs[1].plot(skel[:, 0], skel[:, 1], '.-')
             
-            
+        if target['heads'].shape[0] >= 0:
+            h = target['heads']
+            axs[1].plot(h[:, 0], h[:, 1], 'or')

@@ -44,33 +44,77 @@ flow_args = dict(
                  zoom_range = None,
             )
 
-    #%%
-
+#%%
 
 available_models = {
     'openpose'  : dict(
-            PAF_seg_dist = 5,
-            n_segments = 49,
-            n_stages = 6,
-            features_type = 'vgg19'
+            PAF_seg_dist = 1,
+            n_segments = 15, #old was n_segments=49 and PAF_seg_dist = 5
+            n_stages = 6, 
+            features_type = 'vgg19',
+            use_head_loss = False,
+            fold_skeleton = True,
+            pose_loss_type = 'maxlikelihood'
         ),
+    'openpose+head'  : dict(
+            PAF_seg_dist = 1,
+            n_segments = 15,
+            n_stages = 6,
+            features_type = 'vgg19',
+            use_head_loss = True,
+            fold_skeleton = True,
+            pose_loss_type = 'maxlikelihood'
+        ),
+    
     'openpose+light'  : dict(
             PAF_seg_dist = 1,
             n_segments = 15,
             n_stages = 4,
-            features_type = 'vgg11'
+            features_type = 'vgg11',
+            use_head_loss = False,
+            fold_skeleton = True,
+            pose_loss_type = 'maxlikelihood'
         ),
     
+    'openpose+light+head' : dict(
+            PAF_seg_dist = 1,
+            n_segments = 15,
+            n_stages = 4,
+            features_type = 'vgg11',
+            use_head_loss = True,
+            fold_skeleton = True,
+            pose_loss_type = 'maxlikelihood'
+        ),
+    'openpose+light+full'  : dict(
+            PAF_seg_dist = 1,
+            n_segments = 15,
+            n_stages = 4,
+            features_type = 'vgg11',
+            use_head_loss = False,
+            fold_skeleton = False,
+            pose_loss_type = 'maxlikelihood'
+        ),
+    'openpose+light+fullsym'  : dict(
+            PAF_seg_dist = 1,
+            n_segments = 15,
+            n_stages = 4,
+            features_type = 'vgg11',
+            use_head_loss = False,
+            fold_skeleton = False,
+            pose_loss_type = 'maxlikelihood+symetric'
+        ),
     'keypointrcnn+resnet50' : dict(
             backbone = 'resnet50',
             PAF_seg_dist = None,
             n_segments = 49,
+            fold_skeleton = False
             
         ),
     'keypointrcnn+resnet18'  : dict(
             backbone = 'resnet18',
             PAF_seg_dist = None,
             n_segments = 49,
+            fold_skeleton = False
             
         ),
     
@@ -112,6 +156,7 @@ def train_PAF(
                              return_key_value_pairs = True,
                              PAF_seg_dist = model_args['PAF_seg_dist'],
                              n_segments = model_args['n_segments'],
+                             fold_skeleton = model_args['fold_skeleton'],
                              return_bboxes = return_bboxes,
                              return_half_bboxes = return_half_bboxes,
                              **flow_args
@@ -122,6 +167,7 @@ def train_PAF(
                              return_key_value_pairs = True,
                              PAF_seg_dist = model_args['PAF_seg_dist'],
                              n_segments = model_args['n_segments'],
+                             fold_skeleton = model_args['fold_skeleton'],
                              return_bboxes = return_bboxes,
                              return_half_bboxes = return_half_bboxes,
                              **flow_args
@@ -133,7 +179,9 @@ def train_PAF(
                 n_segments = train_flow.n_segments_out, 
                 n_affinity_maps = train_flow.n_affinity_maps_out, 
                 n_stages = model_args['n_stages'],
-                features_type = model_args['features_type']
+                features_type = model_args['features_type'],
+                use_head_loss = model_args['use_head_loss'],
+                pose_loss_type = model_args['pose_loss_type']
                 )
     else:
         model = get_keypointrcnn(backbone = model_args['backbone'],

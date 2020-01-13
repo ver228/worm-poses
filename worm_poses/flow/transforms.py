@@ -297,6 +297,10 @@ class ToTensor(object):
         
         if 'skels' in target:
             target['skels'] = torch.from_numpy(target['skels']).long()
+        
+        if 'heads' in target:
+            target['heads'] = torch.from_numpy(target['heads']).long()
+        
         if 'PAF' in target:
             target['PAF'] = torch.from_numpy(target['PAF']).float()
         
@@ -308,5 +312,8 @@ class ToTensor(object):
         
         if 'labels' in target:
             target['labels'] = torch.from_numpy(target['labels']).float()
+            
+        if 'is_valid_ht' in target:
+            target['is_valid_ht'] = torch.from_numpy(target['is_valid_ht']).bool()
             
         return image, target
