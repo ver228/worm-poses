@@ -165,6 +165,7 @@ def link_skeletons(points,
     weird_skels = []
     
     current_skel_id = 0
+    #tot_frames = 1000
     for frame in tqdm.trange(tot_frames):
         segments_linked = _link_points_to_segments(frame, points, points_g, edges, edges_g, n_segments)
         
@@ -294,20 +295,22 @@ def link_skeletons(points,
         #append the matched skeletons to their corresponding list. 
         if len(matched_skeletons):
             for pid, skel in matched_skeletons.items():
-                segment_sizes = np.linalg.norm(np.diff(skel, axis=-2), axis = -1)
-                largest_size = np.nanmax(segment_sizes)
-                #median_size = np.nanmedian(segment_sizes)
-                #| (segment_sizes > 2*median_size).any()
-                
                 skel_id, _ = prev_frame_skeletons[pid]
                 theta = _angles_btw_segments(skel)
                 
                 
-                #print(largest_size, median_size)
-                #%%
+                segment_sizes = np.linalg.norm(np.diff(skel, axis=-2), axis = -1)
+                largest_size = np.nanmax(segment_sizes)
+                median_size = np.nanmedian(segment_sizes)
+                
+                
+                #Any segment cannot be more than three times the median distance between segments 
+                #or twice the threshold to match halfs of worms
+                size_th = min(2*match_threshold_half, 3*median_size)
+                
                 #This is an extra step to ensure quality of the skeleton.
                 #If there is a segment with a very large separation. It is likely a bad skeleton
-                if (largest_size > 2*match_threshold_half)  | np.any(theta < np.pi/2): 
+                if (largest_size > size_th)  | np.any(theta < np.pi/2): 
                     weird_skels.append((skel_id, frame, skel))
                 else:
                     skeletons[skel_id].append((frame, skel))
@@ -560,46 +563,48 @@ def _get_group_borders(is_valid, pad_val = False):
     #fin if fin<index.size else fin-1)
     ind_ranges = list(zip(turn_on, turn_off))
     return ind_ranges
-                                
-def _h_fill_small_gaps(is_valid, max_gap_size):
-    ind_ranges = _get_group_borders(is_valid)
+#%%
+def _fill_small_gaps(is_valid, max_gap_size):
+    ind_ranges = _get_group_borders(~is_valid)
     #ifter by the gap size
     ind_ranges = [(ini, fin) for ini, fin in ind_ranges if fin-ini > max_gap_size]
     
-    index_filled = np.zeros_like(is_valid)
+    index_filled = np.ones_like(is_valid)
     for ini, fin in ind_ranges:
-        index_filled[ini:fin+1] = True
+        index_filled[ini:fin+1] = False
 
     return index_filled  
+#%%
 
-
-def interpolate_and_smooth(skels, frames, smooth_window, interp_max_gap):
-    frames_inds = frames - frames[0]
+def interpolate_and_smooth(skels_o, frames_o, smooth_window, interp_max_gap):
+    
+    frames_inds = frames_o - frames_o[0]
     expected_tot = frames_inds[-1] + 1
-    n_segments = skels.shape[1]
+    n_segments = skels_o.shape[1]
     
     skels2fill = np.full((expected_tot, n_segments, 2), np.nan)
-    skels2fill[frames_inds] = skels
+    skels2fill[frames_inds] = skels_o
     
     is_valid = ~(np.isnan(skels2fill).any(axis=-1))
     is_valid_filled = is_valid.copy()
     for ii in range(is_valid.shape[1]):
-        is_valid_filled[:, ii] = _h_fill_small_gaps(is_valid[:, ii], interp_max_gap)
+        is_valid_filled[:, ii] = _fill_small_gaps(is_valid[:, ii], interp_max_gap)
     is_valid_filled = is_valid_filled.all(axis=-1)
     
     
-    if np.sum(is_valid.any(axis=1)) <= 3:
-        return np.zeros((0, n_segments, 2), dtype = skels.dtype), np.zeros(0, dtype = frames.dtype)
+    if np.sum(is_valid.all(axis=1)) <= 3:
+        return np.zeros((0, n_segments, 2), dtype = skels_o.dtype), np.zeros(0, dtype = frames_o.dtype)
     
     frames_interp = np.arange(frames_inds[0], frames_inds[-1] + 1)
     if is_valid.all():
-        assert skels2fill.shape[0] == skels.shape[0]
+        assert skels2fill.shape[0] == skels_o.shape[0]
+        skels = skels2fill
+        frames = frames_o.copy()
     else:
         skels_interp = np.full((expected_tot, n_segments, 2), np.nan)
         for iseg in range(n_segments):
             for icoord in range(2):
                 yy = skels2fill[:, iseg, icoord]
-                
                 
                 _valid = ~np.isnan(yy)
                 
@@ -615,9 +620,7 @@ def interpolate_and_smooth(skels, frames, smooth_window, interp_max_gap):
                     skels_interp[:, iseg, icoord] = yy
         
         skels = skels_interp
-        
-        
-        frames = frames_interp + frames[0]
+        frames = frames_interp + frames_o[0]
     
     #smooth on time
     if skels.shape[0] > smooth_window:
@@ -629,16 +632,21 @@ def interpolate_and_smooth(skels, frames, smooth_window, interp_max_gap):
                                                             mode = 'interp'
                                                             )
     
-    
     skels = skels[is_valid_filled]
     frames = frames[is_valid_filled]
+    
+    # dd = np.diff(frames)
+    # if ((dd > 1) & (dd <interp_max_gap)).any():
+    #     import pdb
+    #     pdb.set_trace()
+    
     return skels, frames
     
 
 
 def smooth_skeletons(skeletons, 
                      smooth_window_s = 0.25,
-                     interp_max_gap_s = 1.,
+                     interp_max_gap_s = 0.25,
                      fps = 25,
                      target_n_segments = 49
                      ):
@@ -651,16 +659,18 @@ def smooth_skeletons(skeletons,
     
     for worm_data in tqdm.tqdm(skeletons):
         frames, skels = map(np.array, zip(*worm_data))
-        
         skels, frames = interpolate_and_smooth(skels, frames, smooth_window, interp_max_gap)
         
-        skels_smoothed = skels
+        
+        #skels_smoothed = skels
         #interpolate using a cubic spline to the 49 segments we typically use
         skels_smoothed = np.full((skels.shape[0], target_n_segments, 2), np.nan)
         for ii, skel in enumerate(skels):
             skels_smoothed[ii] = _h_resample_curve(skel, 
                                               resampling_N = target_n_segments, 
                                               interp_kind = 'cubic')[0]
+        
+        
         
         worm_data_s = list(zip(frames, skels_smoothed))
         
@@ -865,10 +875,12 @@ def _process_file_single_worm(unlinked_segments_file,
     return skeletons
 if __name__ == '__main__':
     import random
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/unlinked/')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/mating')
     #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Bertie_movies/Results')
     #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/WT2')
     root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Serena_WT_Screening')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Syngenta')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Pratheeban')
     
     assert root_dir.exists()
     #unlinked_segments_file = root_dir / (bn + '_unlinked-skels-rois.hdf5')
@@ -879,7 +891,6 @@ if __name__ == '__main__':
     ext2save = '_skeletonsNN.hdf5'
     #files2process = list(root_dir.rglob('*' + _ext))
     files2process = list(root_dir.glob('*' + _ext))
-    
     
     #files2process = list(root_dir.rglob('JU792_Ch1_24092017_063115' + _ext))
     

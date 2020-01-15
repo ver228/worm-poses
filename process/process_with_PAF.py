@@ -245,10 +245,10 @@ if __name__ == '__main__':
     
     #%%
     #root_dir = Path.home() / 'workspace/WormData/screenings/mating_videos/wildMating/'
-    #root_dir = Path.home() / 'workspace/WormData/screenings/mating_videos/Mating_Assay/'
+    root_dir = Path.home() / 'workspace/WormData/screenings/mating_videos/Mating_Assay/'
     #root_dir = Path.home() / 'workspace/WormData/screenings/Pratheeban/'
     #root_dir = Path.home() / 'workspace/WormData/screenings/Serena_WT_Screening/'
-    root_dir = Path.home() / 'workspace/WormData/screenings/pesticides_adam/Syngenta/'
+    #root_dir = Path.home() / 'workspace/WormData/screenings/pesticides_adam/Syngenta/'
     
     
     mask_dir = root_dir / 'MaskedVideos'

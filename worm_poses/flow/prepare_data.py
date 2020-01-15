@@ -36,6 +36,19 @@ def remove_duplicated_annotations(skels, widths, cutoffdist = 3.):
         
     return skels, widths
 
+def is_invalid_with_zeros(roi, skels, max_zeros_frac = 0.1):
+    skels_i = skels.astype('int')
+        
+    H,W = roi.shape
+    scores = []
+    for skel_i in skels_i:
+        skel_i[skel_i[:, 0] >= W, 0] = W - 1
+        skel_i[skel_i[:, 1] >= H, 1] = H - 1
+        ss = roi[skel_i[..., 1], skel_i[..., 0]]
+        scores.append((ss==0).mean())
+    
+    return any([x>max_zeros_frac for x in scores])
+        
 
 class SerializedData():
     def __init__(self, data, field_names = [], shared_objects = None, is_read_only = True):
@@ -169,11 +182,17 @@ def read_data_files( root_dir,
             
             if roi_mask.sum() == 0:
                 continue
-            #there seems to be some skeletons that are an array of duplicated points...
             
+            #skeletons that are mostly in the black part of the image
+            if is_invalid_with_zeros(roi_mask, skels):
+                continue
+            
+            #there are some skeletons that are only one point...
             mean_Ls = np.linalg.norm(np.diff(skels, axis=1), axis=2).sum(axis=1)
             if np.any(mean_Ls< 1.):
                 continue
+            
+             #there seems to be some skeletons that are an array of duplicated points...
             skels, widths = remove_duplicated_annotations(skels, widths)
             
             data_filtered.append((roi_mask, roi_full, widths, skels, *_out[4:]))
