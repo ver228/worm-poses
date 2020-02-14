@@ -28,10 +28,13 @@ def groupbybasename(fnames):
 if __name__ == '__main__':
     _is_debug = False
             
-    root_dir = Path.home() / 'workspace/WormData/worm-poses/raw/rois/'
-    save_dir = Path.home() / 'workspace/WormData/worm-poses/labelled_rois/manual_from_images'
+    #root_dir = Path.home() / 'workspace/WormData/worm-poses/raw/rois/'
+    #save_dir = Path.home() / 'workspace/WormData/worm-poses/labelled_rois/manual_from_images'
     
-    for phase_id in ['Phase5']: #'Phase4', 
+    root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/manual_annotations/')
+    save_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/labelled_rois/')
+                    
+    for phase_id in ['Phase_7', 'Phase_8', 'Phase_9', 'Phase_10']: #'Phase4', 
 
         
         annotations_dir = root_dir / phase_id / 'annotations'
@@ -40,17 +43,19 @@ if __name__ == '__main__':
         
         fnames = annotations_dir.glob('*.xml')
         fnames = [x for x in fnames if not x.name.startswith('.')]
+        
+        #%%
         for img_id, annotations_file in enumerate(tqdm.tqdm(fnames)):
             #save_name = save_dir / phase_id/ f'I{img_id}-R0_{annotations_file.stem}.hdf5'
             #if save_name.exists():
             #    continue
-
+            
             img_name = annotations_file.stem + '.png'
             
             full_fname = full_dir / img_name
             mask_fname = mask_dir / img_name
             
-            assert mask_fname.exists or full_fname.exists()
+            assert (mask_fname.exists() or full_fname.exists())
             
             img_full = cv2.imread(str(full_fname), -1)
             if img_full is not None:
@@ -59,7 +64,8 @@ if __name__ == '__main__':
             img_masked = cv2.imread(str(mask_fname), -1)
             if img_masked is not None:
                 img_masked = img_masked.T.copy()
-            
+            else:
+                img_masked = img_full
             
             labelled_rois = get_labelled_rois(annotations_file, img_masked, img_full)
             for roi_id, roi_data in enumerate(labelled_rois):
@@ -78,12 +84,12 @@ if __name__ == '__main__':
                     axs[0].imshow(roi_masked, cmap = 'gray')
                     axs[1].imshow(roi_full, cmap = 'gray')
                     
-                    for ax in axs:
-                        for skel, c1, c2 in zip(skels, cnt1, cnt2):
-                            ax.plot(skel[:, 0], skel[:, 1])
-                            ax.plot(c1[:, 0], c1[:, 1])
-                            ax.plot(c2[:, 0], c2[:, 1])
-                    plt.show()
                     
-            if _is_debug and img_id > 5:
+                    for skel, c1, c2 in zip(skels, cnt1, cnt2):
+                        axs[1].plot(skel[:, 0], skel[:, 1])
+                        #ax.plot(c1[:, 0], c1[:, 1])
+                        #ax.plot(c2[:, 0], c2[:, 1])
+                    plt.show()
+                    #%%
+            if _is_debug and img_id > 20:
                 break

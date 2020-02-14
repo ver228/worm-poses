@@ -38,21 +38,23 @@ def get_duplicates(skels, cutoffdist = 3.):
         
     return is_duplicates
 
-root_dir = Path.home() / 'workspace/WormData/worm-poses/labelled_rois/'
-save_root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/'
+#root_dir = Path.home() / 'workspace/WormData/worm-poses/labelled_rois/'
+#save_root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/'
 
+root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/labelled_rois/')
+save_root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/')
 
 #MAX_N_FILES = 110000
 MAX_N_FILES = 51000
-n_test = 500
-n_val = 500
+n_test = 250#500
+n_val = 250#500
 
 now = datetime.datetime.now()
 date_str = now.strftime('%Y%m%d_%H%M%S')
 save_dir = save_root_dir / date_str
 save_dir.mkdir(parents = True, exist_ok = True)
 
-for data_type in [ 'manual', 'from_tierpsy']:
+for data_type in ['manual-v2']:#[ 'manual', 'from_tierpsy']:
     fnames = (root_dir / data_type).rglob('*.hdf5')
     fnames = [x for x in fnames if not x.name.startswith('.')]
     

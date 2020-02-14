@@ -129,7 +129,6 @@ def train_poses(save_prefix,
         batch_size = 16,
         n_epochs = 2000,
         num_workers = 1,
-        init_model_path = None,
         save_frequency = 200
         ):
     

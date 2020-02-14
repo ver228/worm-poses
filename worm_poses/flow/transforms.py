@@ -49,7 +49,8 @@ class AffineTransformBounded(TransformBase):
                  zoom_range = (0.9, 1.1), 
                  rotation_range = (-90, 90), 
                  crop_size_lims = None,
-                 border_mode = cv2.BORDER_CONSTANT
+                 border_mode = cv2.BORDER_CONSTANT,
+                 interpolation = cv2.INTER_LINEAR
                  ):
         
         assert not ((zoom_range is None) and (crop_size_lims is None)), "`zoom_range` and `crop_size_lims` cannot be None simultanously"
@@ -59,7 +60,7 @@ class AffineTransformBounded(TransformBase):
         
         self.rotation_range = rotation_range
         
-        self.w_affine_args = dict(borderMode = border_mode)
+        self.w_affine_args = dict(borderMode = border_mode, flags=interpolation)
 
     
     def __call__(self, image, target):
@@ -166,8 +167,6 @@ class PadToSize(TransformBase):
             return scalars
         else:
             return scale_factor*scalars
-        
-
 
 class RandomVerticalFlip(TransformBase):
     def __init__(self, prob = 0.5):
@@ -229,16 +228,18 @@ class NormalizeIntensity(object):
 
 
 class RandomIntensityOffset(object):
-    def __init__(self, offset_range = (-0.2, 0.2)):
+    def __init__(self, offset_range):
         self.offset_range = offset_range
     
     def __call__(self, image, target):
-        if self.offset_range is not None and random.random() > 0.5:
-            
-            if image.ndim == 2:
-                offset = random.uniform(*self.offset_range)
+        if random.random() > 0.5:
+            if self.offset_range is None:
+                vv = image[image!=0]
+                rr = np.min(vv), np.max(vv)
+                offset = random.uniform(-rr[0], 1 - rr[1])
             else:
-                offset = np.random.uniform(*self.offset_range, 3)[None, None, :]
+                offset = random.uniform(*self.offset_range)
+                
             image = image + offset
                 
         return image, target
@@ -289,8 +290,75 @@ class AddBlankPatch():
             image[x:x+w, y:y+h] = random.random()
         
         return image, target
+
+class AddRandomLine():
+    def __init__(self, prob = 0.5):
+        self.prob = prob
     
     
+    
+    def __call__(self, image, target):
+        if random.random() < self.prob:
+            pt1, pt2 = [tuple([random.randint(0, r-1) for r in image.shape]) for _ in range(2)]
+            
+            thinkness = random.randint(1, 5)
+            
+            cv2.line(image, pt1, pt2, random.random(), thinkness)
+            
+        
+        return image, target
+
+class JpgCompression():
+    def __init__(self, quality_range = (40, 90), prob = 0.5):
+        self.prob = prob
+        self.quality_range = quality_range
+    
+    
+    def __call__(self, image, target):
+        if random.random() < self.prob:
+            quality = random.uniform(*self.quality_range)
+            
+            img_uint8 = (np.clip(image, 0, 1)*255).astype(np.uint8)
+            
+            im_encoded = cv2.imencode('.jpg', img_uint8, (cv2.IMWRITE_JPEG_QUALITY, quality))[-1]
+            im_decoded = cv2.imdecode(im_encoded, cv2.IMREAD_UNCHANGED)
+            
+            image = im_decoded.astype(np.float32)/255
+        
+        return image, target
+
+class RandomFlatField(object):
+    def __init__(self, roi_size, prob = 0.5):
+        self.prob = prob
+        self.roi_size = roi_size
+        self.base_factor_range = (0.2, 0.5)
+        self.sigma_range = roi_size//4, roi_size
+        self.xx, self.yy = np.meshgrid(np.arange(roi_size), np.arange(roi_size))
+        
+    def __call__(self, image, target):
+        
+        if  random.random() < self.prob:
+            base_factor = random.uniform(*self.base_factor_range)
+            
+            sigma = random.uniform(*self.sigma_range )
+            
+            mu_x = random.uniform(0, self.roi_size)
+            mu_y = random.uniform(0, self.roi_size)
+            dx = self.xx-mu_x
+            dy = self.yy-mu_y
+            
+            flat_field = np.exp(-(dx*dx + dy*dy)/sigma**2)
+            bot = flat_field.min()
+            
+            flat_field -= bot
+            flat_field /= (1-bot)
+            
+            
+            flat_field = (1 - base_factor) * flat_field + base_factor
+            image = image*flat_field
+            
+        return image, target
+ 
 class ToTensor(object):
     def __call__(self, image, target):
         image = torch.from_numpy(image).float()

@@ -16,8 +16,9 @@ from scipy.optimize import linear_sum_assignment
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
     
-def _get_best_edge_match(_edges, min_PAF = 0.2):
+def _get_best_edge_match(_edges, min_PAF = 0.25):
     _edges = _edges[_edges['cost_PAF'] >= min_PAF]
+
     _edges = _edges[np.argsort(_edges['cost_PAF'])[::-1]] #sort with the largest PAF first...
     _, valid_index =  np.unique(_edges['point1'], return_index = True ) #unique returns the first occurence (the largest value on the sorted list)
     
@@ -60,6 +61,7 @@ def _join_segments_by_midpoint(segments2check, n_segments):
             midbody_ind = _half[-1]['point_id']
             matched_halves[midbody_ind].append(_half)
         else:
+            
             missing_segments.append(_half)
     
     
@@ -78,7 +80,7 @@ def _get_length(_skels):
     seg = np.linalg.norm(np.diff(_skels, axis=-2), axis=-1)
     return np.nansum(seg, axis = -1)
     
-def _get_cost(src, target):
+def _get_cost_max(src, target):
     rr = src[:, None] - target[None, ...]
     cost = np.nanmax(np.sqrt((rr**2).sum(-1)), -1)
     return cost
@@ -115,8 +117,9 @@ def _seglist2array(segments_list, n_segments):
         segments_array[iseg, inds, 1] = seg['y']
     
     return segments_array
-
-def _angles_btw_segments(skel):
+#%%
+def _angles_btw_segments(skel, eps = 1e-5):
+    
     s1 = skel[:-2] - skel[1:-1]
     s2 = skel[2:] - skel[1:-1]
     
@@ -124,9 +127,25 @@ def _angles_btw_segments(skel):
     dotprod = np.sum(s1*s2, axis=1)
     s1_mag = np.linalg.norm(s1, axis=1)
     s2_mag = np.linalg.norm(s2, axis=1)
-    theta = np.arccos(dotprod/(s1_mag*s2_mag))
-    return theta
     
+    s1_mag = np.maximum(s1_mag, eps)
+    s2_mag = np.maximum(s2_mag, eps)
+    
+    cos_ = dotprod/(s1_mag*s2_mag)
+    cos_ = np.clip(cos_, -1 + eps, 1 - eps)
+    theta = np.arccos(cos_)
+    
+    return theta
+
+
+def _remove_if_repeated(skel):
+    repeated_points, = np.where((np.diff(skel, axis=-2) == 0).all(axis=1))
+    if repeated_points.size == 1:
+        ii = repeated_points[0]
+        skel = np.concatenate((skel[:ii], skel[ii+1:]))
+        
+    return skel
+
     
 
 #%%
@@ -140,7 +159,7 @@ def link_skeletons(points,
     skel_size = 2*n_segments - 1
     
     if max_frac_dist_half is None:
-        max_frac_dist_half =  2/n_segments #2/n_segments
+        max_frac_dist_half =  4/n_segments #2/n_segments
     if max_frac_dist_seg is None:
         max_frac_dist_seg = 1/n_segments #0.5/skel_size #1/skel_size
     
@@ -175,7 +194,6 @@ def link_skeletons(points,
             
             remaining_segments = segments_linked
         else:
-            
             #### match previous skeletons to their halves using large sements from the current frame
             prev_skels = np.array([x[-1] for x in prev_frame_skeletons])
             prev_halves = np.concatenate((prev_skels[:, :n_segments], prev_skels[:, (n_segments-1):][:, ::-1]))
@@ -186,7 +204,7 @@ def link_skeletons(points,
             target_halves = _seglist2array(segments2check, n_segments)
             
             match_threshold_half = max_frac_dist_half*np.median(_get_length(prev_halves))
-            cost = _get_cost(prev_halves, target_halves)
+            cost = _get_cost_max(prev_halves, target_halves)
             matches = _greedily_match(cost, match_threshold_half)
             
             n_prev_skels = len(prev_skels)
@@ -211,11 +229,11 @@ def link_skeletons(points,
             remaining_inds = set(list(range(len(segments2check)))) - used_inds
             remaining_segments = [segments2check[i] for i in remaining_inds]
             
-            # i want to only use complete segments to create a skeleton di novo
+            # # i want to only use complete segments to create a skeleton di novo
             short_segments += [x for x in remaining_segments if len(x) < n_segments]
             remaining_segments = [x for x in remaining_segments if len(x) == n_segments] 
             
-            #try to match any remaining point
+            # #try to match any remaining point
             unmatched_inds = set(list(range(n_prev_skels))) - set(dat2match.keys())
             unmatched_skeletons = [(i, _get_length(prev_skels[i]), prev_skels[i]) for i in unmatched_inds] 
             n_unmatched = len(unmatched_skeletons)
@@ -229,8 +247,6 @@ def link_skeletons(points,
                     skel_[_bad] = prev_skels[pid][_bad]
                     points2check.append((pid, _get_length(prev_skels[pid]), skel_))
             remaining_points = [p for x in short_segments for p in x]
-            
-            
             
             if points2check and remaining_points:
                 #match remaing points with the missing points in the skeletons
@@ -265,6 +281,7 @@ def link_skeletons(points,
                     
                     for pid,skel in point_matched_skels:
                         matched_skeletons[pid] = skel
+              
             
             #if a matched skeleton has a lot of missing points (n_segments/2) it will be removed
             #In skeletons with only a few missing points, the missing points 
@@ -273,57 +290,80 @@ def link_skeletons(points,
             matched_skeletons = {}
             for pid, skels_new in matched_skeletons_r.items():
                 bad_ = np.isnan(skels_new[:, 0])
-                if np.sum(bad_) > n_segments//2:
+                n_bads = np.sum(bad_)
+                if n_bads > n_segments//2:
                     continue
                 else:
-                    #skel_prev = prev_skels[pid]
-                    #skels_new[bad_] = skel_prev[bad_]
+                    if n_bads > 0:
+                        skel_prev = prev_skels[pid]
+                        i_bads, = np.where(bad_)
+                        for i_bad in i_bads:
+                            prev_match = skel_prev[i_bad]
+                            if np.isnan(prev_match[0]):
+                                continue
+                            closest_id = np.nanargmin(np.linalg.norm(prev_match - skels_new, axis=-1))
+                            if closest_id !=  (i_bad - 1) and closest_id !=  (i_bad + 1):
+                                skels_new[i_bad] = skels_new[closest_id]
+                        
+                    
                     matched_skeletons[pid] =  skels_new
-            
+        
+        
+        
         #I will attempt to join remaining segments by matching their middle point. 
         #This skeletons correspond to the new skeletons (new trajectories).
         new_skels, missing_in_frame = _join_segments_by_midpoint(remaining_segments, n_segments)
+        
         for skel in new_skels:
             skeletons.append([(frame, skel)])
         current_skel_id += len(new_skels)
         
-        #if frame == 6267:
-        #    import pdb
-        #    pdb.set_trace()
-        
-        #%%
+        # remaining_segments
         #append the matched skeletons to their corresponding list. 
         if len(matched_skeletons):
             for pid, skel in matched_skeletons.items():
                 skel_id, _ = prev_frame_skeletons[pid]
-                theta = _angles_btw_segments(skel)
                 
                 
                 segment_sizes = np.linalg.norm(np.diff(skel, axis=-2), axis = -1)
                 largest_size = np.nanmax(segment_sizes)
                 median_size = np.nanmedian(segment_sizes)
-                
-                
+                    
                 #Any segment cannot be more than three times the median distance between segments 
                 #or twice the threshold to match halfs of worms
                 size_th = min(2*match_threshold_half, 3*median_size)
                 
+                
+                theta = _angles_btw_segments(skel)
+                
+                theta = theta[~np.isnan(theta)]
+                
                 #This is an extra step to ensure quality of the skeleton.
                 #If there is a segment with a very large separation. It is likely a bad skeleton
-                if (largest_size > size_th)  | np.any(theta < np.pi/2): 
+                if (largest_size > size_th) or np.any(theta < np.pi/2): 
                     weird_skels.append((skel_id, frame, skel))
                 else:
                     skeletons[skel_id].append((frame, skel))
-        
+                
         
         skels_in_frame = []
+        
+        
         for skel_id, traj_data in enumerate(skeletons):
             last_frame, last_skel = traj_data[-1]
-            
-            if frame - last_frame < check_frame_window:
+            if (frame - last_frame) <= check_frame_window:
+                last_skel = last_skel.copy()
+                for frame_, skel_ in traj_data[-2::-1]:
+                    if not np.any(np.isnan(last_skel)) or (frame - frame_) > check_frame_window:
+                        break
+                    bad_ = np.isnan(last_skel)
+                    last_skel[bad_] = skel_[bad_]
+                
                 skels_in_frame.append((skel_id, last_skel))
         
         prev_frame_skeletons = skels_in_frame    
+    
+    
     
     #return skeletons
     
@@ -346,19 +386,26 @@ def _get_head_tail_score(skel, ht_points, head_ind = 2, max_dist = 2):
     
     dx = (skel[head_ind, 0] - ht_points['x'])
     dy = (skel[head_ind, 1] - ht_points['y'])
-    r_head = np.sqrt(dx**2 + dy**2).min()
+    r_head = np.sqrt(dx**2 + dy**2)
+    i_head = np.argmin(r_head)
     
     dx = (skel[tail_id, 0] - ht_points['x'])
     dy = (skel[tail_id, 1] - ht_points['y'])
-    r_tail = np.sqrt(dx**2 + dy**2).min()
+    r_tail = np.sqrt(dx**2 + dy**2)
+    i_tail = np.argmin(r_tail)
     
-    if r_head > max_dist:
-        return 0 if r_tail > max_dist else -1
-    else:
-        return 1 if r_tail > max_dist else 0
+    head_score = ht_points[i_head]['score'] if r_head[i_head] < max_dist else 1e-10
+    tail_score = ht_points[i_tail]['score'] if r_tail[i_tail] < max_dist else 1e-10
     
-        
+    ht_score = head_score/(head_score + tail_score)
+    return ht_score
     
+#%%
+def _get_cost_median(src, target):
+    rr = src[:, None] - target[None, ...]
+    cost = np.nanmedian(np.linalg.norm(rr, axis=-1), axis = -1)
+    
+    return cost    
 #%%
 def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost = True):
     '''
@@ -370,6 +417,7 @@ def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost
     #first sort the skeletons by time
     skeletons = sorted(skeletons, key = lambda x : x[0][0])
     
+    
     #list of the first and last skeletons of each trajectory
     initial_skels, final_skels = zip(*[((ii, *x[0][:2]), (ii, *x[-1][:2])) for ii, x in enumerate(skeletons)])
     
@@ -378,7 +426,7 @@ def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost
     for i_initial, (skel_id, frame, skel) in enumerate(initial_skels):
         initial_skels_d[frame].append((i_initial, skel_id, skel))
     initial_skels_d = {k : v for k, v in initial_skels_d.items()}
-    
+    #%%
     #build the cost matrix
     largest_val = 1e6
     join_costs_signed = np.full(( len(final_skels), len(initial_skels)), largest_val)
@@ -396,12 +444,12 @@ def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost
         i_initials, skel_targets_ids, skels_target = zip(*candidate_matches)
         skels_target = np.array(skels_target)
         
-        cost1 = _get_cost(skel[None], skels_target)[0]
+        cost1 = _get_cost_median(skel[None], skels_target)[0]
         if include_switched_cost:
             #i calculate one cost of the match using the normal and a switched version 
             #of the skeleton to accound for head/ tail switches.
             
-            cost2 = _get_cost(skel[::-1][None], skels_target)[0]
+            cost2 = _get_cost_median(skel[::-1][None], skels_target)[0]
             
             #I will assign a negative value as a flag if there is a head/tail switch.
             #however the linear assigment will occur in the absolute values
@@ -409,13 +457,14 @@ def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost
         else:
             w_cost_signed = cost1
         
+        
         #any cost above the match threshold will be assigned to the largest value
         #this will effectively remove the values from the minimization procedure
         match_th = _get_length(skel)*max_frac_dist
         w_cost_signed[np.abs(w_cost_signed)>match_th] = largest_val 
         
         join_costs_signed[i_final, i_initials] = w_cost_signed
-    
+    #%%
     #for speed reasons i want to make the assigment to only the columns with a valid match candidate
     bad = join_costs_signed >= largest_val
     valid_final = ~bad.all(axis=1)
@@ -429,11 +478,14 @@ def _match_trajectories(skeletons, max_gap, max_frac_dist, include_switched_cost
     concat_costs_signed = join_costs_signed[valid_final, :][:, valid_initial]
     compact_cost = np.abs(concat_costs_signed)
     
+    compact_cost[np.isnan(compact_cost)] = largest_val
+    
     #finally we do the linear assigment. If the matrix is very lage this could take forever.
     #for the moment it seems it is working fine, but it might be good to replace 
     #it with something like lapjv (https://github.com/berhane/LAP-solvers). 
     #However,there is not official implementation (scipy)
     final_ind, ini_ind = linear_sum_assignment(compact_cost)
+    
     _good = ~(compact_cost[final_ind, ini_ind] >= largest_val)
     final_ind, ini_ind = final_ind[_good], ini_ind[_good]
     
@@ -756,16 +808,68 @@ def _correct_ht_by_movement(skels, fps):
         skels = skels[:, ::-1]
     
     return skels
-def correct_headtail(skeletons, fps):
+
+def correct_headtail(skeletons, fps, min_len_NN_s = 10,  min_len_movement_s = 30, max_traj_gap_s = 0.5):
+    
+    
+    def sec2frames_f(x, fps = fps): 
+        return max(1, int(x*fps))
+    max_traj_gap = sec2frames_f(max_traj_gap_s)
+    min_len_NN = sec2frames_f(min_len_NN_s)
+    min_len_movement = sec2frames_f(min_len_movement_s)
+    
+    
+    
     
     skeletons_oriented = []
     for skel_data in skeletons:
-        frames, skels, head_scores = map(np.array, zip(*skel_data))
-        #import pdb
-        #pdb.set_trace()
+        frames, skels, skels_head_scores = map(np.array, zip(*skel_data))
         
-        skels_corr = _correct_ht_by_movement(skels, fps)
-        skel_data_r = list(zip(frames, skels_corr))
+        traj_breaks, = np.where(np.diff(frames) > max_traj_gap)
+        traj_breaks = [0] + traj_breaks.tolist() + [frames.size]
+        
+        # #get a global switch, just in case the trajectory is too small or it has only small tracks.
+        # #it is uncertain anyway, so at least let's try to score it.
+        # if np.mean(skels_head_scores) < 0.5:
+        #     skels = skels[:, ::-1]
+        
+        prev_traj = None
+        skels_corrected = []
+        for ini, fin in zip(traj_breaks[:-1], traj_breaks[1:]):
+            traj_skel = skels[ini:fin]
+            traj_len = traj_skel.shape[0]
+            traj_score = np.mean(skels_head_scores[ini:fin+1])
+            
+            
+            
+            if traj_len < min_len_NN:
+                is_valid = False
+            elif (traj_score < 0.4): 
+                #is tail, switch skeletons
+                is_valid = True
+                traj_skel = traj_skel[:, ::-1]
+            elif traj_score > 0.6:
+                is_valid = True
+            elif traj_len >= min_len_movement:
+                traj_skel = _correct_ht_by_movement(traj_skel, fps)
+                is_valid = True
+            else:
+                is_valid = False
+            
+            if not is_valid and prev_traj is not None:
+                avg_prev_skel = np.mean(prev_traj[-max_traj_gap:], axis=0)
+                avg_next_skel = np.mean(traj_skel[:max_traj_gap], axis=0)
+                
+                norm_diff = np.linalg.norm(avg_next_skel-avg_prev_skel, axis=1).sum()
+                switch_diff = np.linalg.norm(avg_next_skel[:,::-1]-avg_prev_skel, axis=1).sum()
+                if norm_diff > switch_diff:
+                    traj_skel = traj_skel[:, ::-1]
+            
+            skels_corrected.append(traj_skel)
+        skels_corrected = np.concatenate(skels_corrected)
+        assert skels_corrected.shape == skels.shape
+        
+        skel_data_r = list(zip(frames, skels_corrected))
         skeletons_oriented.append(skel_data_r)
         
     return skeletons_oriented
@@ -849,18 +953,20 @@ def save_skeletons(skeletons_data, save_file):
     
 
 
-def _process_file_single_worm(unlinked_segments_file, 
+def _process_file(unlinked_segments_file, 
                   save_file, 
                   n_segments = 8, 
-                  max_gap_btw_traj = 12,
                   fps = 25,
                   smooth_window_s = 0.25,
+                  max_gap_btw_traj_s = 0.5,
                   target_n_segments = 49
                   ):
     
     with tables.File(unlinked_segments_file) as fid:
         points = fid.get_node('/points')[:]
         edges = fid.get_node('/edges')[:]
+    
+    max_gap_btw_traj = max(int(round(max_gap_btw_traj_s*fps)), 1)
     
     skeletons = link_skeletons(points, edges, n_segments = n_segments)
     skeletons = join_trajectories(skeletons, max_gap = max_gap_btw_traj, max_frac_dist = 2/n_segments)
@@ -873,14 +979,16 @@ def _process_file_single_worm(unlinked_segments_file,
     
     save_skeletons(skeletons, save_file) 
     return skeletons
+
 if __name__ == '__main__':
     import random
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/mating')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Bertie_movies/Results')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/WT2')
-    root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Serena_WT_Screening')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Syngenta')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Pratheeban')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/mating')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Bertie_movies/Results')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/WT2')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Serena_WT_Screening')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Syngenta')
+    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Pratheeban')
+    root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/hydra_example_for_Avelino/LoopBio_ResultsNN_v4PAFflat_openpose+light+head_maxlikelihood_20200206_105708_adam_lr0.0001_wd0.0_batch24')
     
     assert root_dir.exists()
     #unlinked_segments_file = root_dir / (bn + '_unlinked-skels-rois.hdf5')
@@ -890,7 +998,7 @@ if __name__ == '__main__':
     _ext = '_unlinked-skels.hdf5'
     ext2save = '_skeletonsNN.hdf5'
     #files2process = list(root_dir.rglob('*' + _ext))
-    files2process = list(root_dir.glob('*' + _ext))
+    files2process = list(root_dir.rglob('*' + _ext))
     
     #files2process = list(root_dir.rglob('JU792_Ch1_24092017_063115' + _ext))
     
@@ -900,10 +1008,6 @@ if __name__ == '__main__':
         if save_file.exists():
             continue
         
-        skeletons = _process_file_single_worm(fname, save_file)
+        skeletons = _process_file(fname, save_file)
         
-    #%%
     
-    
-    
-       

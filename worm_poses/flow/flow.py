@@ -9,12 +9,14 @@ Created on Fri Dec 14 17:11:22 2018
 from .prepare_data import read_data_files, read_negative_data
 from .transforms import (AffineTransformBounded, Compose, RandomVerticalFlip, 
                         RandomHorizontalFlip, NormalizeIntensity, RandomIntensityExpansion,
-                        RandomIntensityOffset, AddBlankPatch, PadToSize, ToTensor)
+                        RandomIntensityOffset, AddBlankPatch, PadToSize, ToTensor,
+                        AddRandomLine, JpgCompression, RandomFlatField)
 from .encode_PAF import get_part_affinity_maps
 
 import numpy as np
 import random
 from pathlib import Path
+import cv2
 import torch
 from torch.utils.data import Dataset
 
@@ -93,7 +95,7 @@ def get_outputs_sizes(n_segments, PAF_seg_dist, fold_skeleton):
     
     if PAF_seg_dist:
         if fold_skeleton:
-            n_affinity_maps_out = (2*(n_segments//2 - PAF_seg_dist + 1) + 1)//2 + 1
+            n_affinity_maps_out = (2*(n_segments//2 - PAF_seg_dist + 1) + 1)//2 #+ 1
         else:
             n_affinity_maps_out = n_segments - PAF_seg_dist
         
@@ -110,22 +112,25 @@ class SkelMapsFlow(Dataset):
     def __init__(self, 
                  root_dir, 
                  set2read = 'validation',
-                 data_types = ['from_tierpsy', 'manual'],
-                 negative_src = 'from_tierpsy_negative.p.zip',
+                 data_types = ['from_tierpsy', 'manual', 'from_NNv1'],
+                 negative_src = ['from_tierpsy_negative.p.zip', 'from_hydra-bgnd_negative.p.zip'],
                  samples_per_epoch = 12288,
                  scale_int = (0, 255),
                  
-                 roi_size = 256,
-                 crop_size_lims = (50, 180),
+                 roi_size = 362,
+                 crop_size_lims = (25, 256),
                  negative_size_lims = (5, 180),
-                 n_rois_lims = (1, 4),
-                 int_expansion_range = (0.7, 1.3),
-                 int_offset_range = (-0.2, 0.2),
-                 blank_patch_range = (1/8, 1/3),
+                 n_rois_lims = (1, 8),
+                 int_expansion_range = (0.5, 1.3),
+                 int_offset_range = None,
+                 blank_patch_range = (1/8, 1/4),
+                 mixup_probability = 0.,
+                 
                  zoom_range = None,
                  
                  fold_skeleton = True,
                  
+                 is_contour_PAF = True,
                  PAF_seg_dist = 5,
                  n_segments = 49,
                  
@@ -141,12 +146,16 @@ class SkelMapsFlow(Dataset):
         self.roi_size = roi_size #if isinstance(roi_size, (tuple, list)) else (roi_size, roi_size)
         self.n_rois_lims = n_rois_lims
         self.scale_int = scale_int
+        self.crop_size_lims = crop_size_lims
+        self.negative_size_lims = negative_size_lims
+        self.mixup_probability = mixup_probability
         
         self.return_bboxes = return_bboxes
         self.return_half_bboxes = return_half_bboxes
         
         self.fold_skeleton = fold_skeleton
         self.PAF_seg_dist = PAF_seg_dist
+        self.is_contour_PAF = is_contour_PAF
         self.n_segments = n_segments
         
         self.n_segments_out, self.n_affinity_maps_out = get_outputs_sizes(n_segments, PAF_seg_dist, fold_skeleton)
@@ -158,8 +167,8 @@ class SkelMapsFlow(Dataset):
         self._input_names = list(set(dir(self)) - _dum) #i want the name of this fields so i can access them if necessary
         
         
-        negative_src = Path(negative_src)
-        self.negative_src = negative_src if negative_src.exists() else root_dir / negative_src
+        self.negative_src = [Path(x) for x in negative_src]
+        self.negative_src = [x if x.exists() else root_dir / x for x in self.negative_src]
         
         
         self.data = read_data_files(root_dir, set2read, data_types)
@@ -169,14 +178,14 @@ class SkelMapsFlow(Dataset):
         self.data_indexes = [(k, ii) for k,val in self.data.items() for ii in range(len(val))]
         
         
-        
         transforms = [AffineTransformBounded(crop_size_lims = crop_size_lims, zoom_range = zoom_range),
                         RandomVerticalFlip(), 
                         RandomHorizontalFlip(),
                         NormalizeIntensity(scale_int),
                         RandomIntensityExpansion(int_expansion_range), 
                         RandomIntensityOffset(int_offset_range),
-                        AddBlankPatch(blank_patch_range)
+                        AddBlankPatch(blank_patch_range),
+                        AddRandomLine()
                         ]
         self.transforms_worm = Compose(transforms)
         
@@ -188,6 +197,10 @@ class SkelMapsFlow(Dataset):
                         RandomIntensityOffset(int_offset_range)
                         ]
         self.transforms_negative = Compose(transforms)
+        
+        transforms = [RandomFlatField(self.roi_size),
+                      JpgCompression(quality_range = (40, 90))]
+        self.transforms_image = Compose(transforms)
         
         self.to_tensor = ToTensor()
         
@@ -205,7 +218,7 @@ class SkelMapsFlow(Dataset):
         
         return head_coords, is_valid_ht
     
-    def _get_random_worm(self):
+    def _get_random_worm(self, use_transforms = True):
         k, ii = random.choice(self.data_indexes)
         raw_data = self.data[k][ii]
         
@@ -223,14 +236,58 @@ class SkelMapsFlow(Dataset):
             if random.random() > 0.5:
                 target['skels'] = target['skels'][:, ::-1] 
         
-        image, target = self.transforms_worm(image, target)
-        target['is_valid_ht'] = is_valid_ht 
+        target['is_valid_ht'] = is_valid_ht
         
+        if use_transforms:
+            image, target = self.transforms_worm(image, target)
         return image, target
     
     def _get_random_negative(self):
         negative_data = random.choice(self.data_negative)
         return self.transforms_negative(negative_data['image'], {})[0]
+    
+    def _get_random_mixup(self):
+        #https://arxiv.org/abs/1710.09412
+        roi_size = random.randint(*self.crop_size_lims)
+        crop_transforms  = Compose(
+                    [AffineTransformBounded(crop_size_lims = (roi_size, roi_size), rotation_range = (0, 0), interpolation = cv2.INTER_NEAREST),
+                     RandomVerticalFlip(), 
+                     RandomHorizontalFlip(),
+                     PadToSize(roi_size)
+                     ])
+        
+        dat = []
+        while len(dat) < 2:
+            image, target = self._get_random_worm(use_transforms = False)
+            if target['skels'].shape[0] != 1:
+                continue
+            
+            image, target = crop_transforms(image, target)
+            
+            image_r = image.astype(np.float32)
+            
+            good = image>0
+            val_pix = image_r[good]
+            bot, top = val_pix.min(), val_pix.max()
+            image_r[good] = (val_pix - bot)/(top - bot + 1e-4)
+            image_r[~good] = 1.
+              
+            dat.append((image_r, target))
+        
+        images, targets = zip(*dat)
+        img_m = np.minimum(*images)
+        intensity_factor = np.random.uniform(0.2, 0.95)
+        intensity_offset = np.random.uniform(0, 1 - intensity_factor)
+        img_m *= intensity_factor
+        img_m += intensity_offset
+        
+        target_m = {}
+        for k in targets[0]:
+            dd = [x[k] for x in targets]
+            dd = False if k == 'is_valid_ht' else np.concatenate(dd)
+            target_m[k] = dd
+        
+        return img_m, target_m
     
     @staticmethod
     def _randomly_locate_roi(image, roi, n_trials = 5):
@@ -259,7 +316,13 @@ class SkelMapsFlow(Dataset):
         n_rois = random.randint(*self.n_rois_lims)
         while n_rois > 0:
 
-            roi, roi_target = self._get_random_worm()
+            if random.random() < self.mixup_probability:
+                roi, roi_target = self._get_random_mixup()
+            else:
+                roi, roi_target = self._get_random_worm()
+            
+            
+            
             n_rois -= 1
             
             corner = self._randomly_locate_roi(img, roi)
@@ -319,8 +382,10 @@ class SkelMapsFlow(Dataset):
         if not self.fold_skeleton:
             target_out['is_valid_ht'] = is_valid_ht
         
-        image_out = np.clip(image, 0, 1)[None]
-        image_out, target_out = self.to_tensor(image_out, target_out)
+        image_out = np.clip(image, 0, 1)
+        image_out, target_out = self.transforms_image(image_out, target_out)
+        
+        image_out, target_out = self.to_tensor(image_out[None], target_out)
         
         if self.return_key_value_pairs:
             out = [x for d in target_out.items() for x in d]
@@ -331,6 +396,10 @@ class SkelMapsFlow(Dataset):
     
     def skels2PAFs(self, skels, widths):
         skels = skels.astype(np.int)
+        
+        if not self.is_contour_PAF:
+            mid = skels.shape[1]//2 + 1
+            widths = [max(2, w[mid]/2) for w in widths]
         PAF = get_part_affinity_maps(skels, 
                                           widths, 
                                           (self.roi_size, self.roi_size), 
@@ -437,6 +506,7 @@ class SkelMapsFlowValidation(SkelMapsFlow):
     def __len__(self):
         return len(self.data_indexes)
     
+
     
 if __name__ == '__main__':
     import tqdm
@@ -444,38 +514,58 @@ if __name__ == '__main__':
     from matplotlib import patches
     
     
-    root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/'
-    root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/'
+    #root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/'
+    #root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/'
+    root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training_filtered/'
     #%%
     #argkws = dict(PAF_seg_dist = 1, n_segments = 15)
-    argkws = dict(PAF_seg_dist = 1, n_segments = 15, fold_skeleton = False)
+    argkws = dict(PAF_seg_dist = 1, n_segments = 15, fold_skeleton = True, is_contour_PAF = False, n_rois_lims = (1, 8), mixup_probability = 0.25)
     
-    gen = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, **argkws)
-    gen_val = SkelMapsFlowValidation(root_dir = root_dir, return_key_value_pairs = False, **argkws)
+    gen = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False,  **argkws)
+    # gen_val = SkelMapsFlowValidation(root_dir = root_dir, return_key_value_pairs = False, **argkws)
     
-    gen_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_bboxes = True)
-    gen_half_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_half_bboxes = True)
+    # gen_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_bboxes = True)
+    # gen_half_boxes = SkelMapsFlow(root_dir = root_dir, return_key_value_pairs = False, return_half_bboxes = True)
+    #%%\
+    
+    
+    img_m, target_m = gen._get_random_mixup()
+    
+    
+    #fig, axs = plt.subplots(1,3, sharex  = True, sharey = True)
+    #axs[0].imshow(images[0], cmap = 'gray', vmin=0., vmax = 1.)
+    #axs[1].imshow(images[1], cmap = 'gray', vmin=0., vmax = 1.)
+    
+    plt.figure()
+    plt.imshow(img_m, cmap = 'gray', vmin=0., vmax = 1.)
+    for skel in target_m['skels']:
+        plt.plot(skel[:, 0], skel[:, 1])
+    
+    
+    
+        
     #%%
     for ind in range(5):
         image, target = gen._get_random_worm()
+        
+        
         fig, axs = plt.subplots(1,2, sharex = True, sharey = True)
         
-        axs[0].imshow(image, cmap = 'gray')
-        axs[1].imshow(image, cmap = 'gray')
+        
+        print(image.min(), image.max())
+        for ax in axs:
+            ax.imshow(image, cmap = 'gray')
+            ax.axis('off')
         
         for skel in target['skels']:
             axs[1].plot(skel[:, 0], skel[:, 1])
         
-        for ax in axs:
-            ax.axis('off')
-    
-    
-    
+        
     #%%
-    for _ in range(5):
-        roi = gen._get_random_negative()
-        plt.figure()
-        plt.imshow(roi, cmap = 'gray')
+    # for _ in range(5):
+    #     roi = gen._get_random_negative()
+    #     plt.figure()
+    #     plt.imshow(roi, cmap = 'gray')
     #%%
     for ind in tqdm.trange(5):
         image, target = gen._build_rand_img()
@@ -489,6 +579,9 @@ if __name__ == '__main__':
         pafs_max = pafs_abs.max(axis=0)
         
         fig, axs = plt.subplots(1,5, figsize = (15, 5), sharex = True, sharey = True)
+        for ax in axs:
+            ax.axis('off')
+        
         axs[0].imshow(img, cmap = 'gray')
         axs[1].imshow(img, cmap = 'gray')
         axs[2].imshow(pafs_head)
@@ -502,21 +595,22 @@ if __name__ == '__main__':
         p = target['heads']
         p = p[p[:, 0]>=0] 
         axs[1].plot(p[:, 0], p[:, 1], 'or')
-        
-    #%%
+    a
+    
     skels = target['skels'].detach().numpy()
     
     PAF_switched = -torch.flip(target['PAF'], dims = (0,))
     PAF = target['PAF']
-    #%%
+    
+    
     for ii, paf in enumerate(PAF):
-        fig, axs = plt.subplots(1, 2)
+        fig, axs = plt.subplots(1, 2, figsize = (20, 10))
         axs[0].imshow(img, cmap = 'gray')
         axs[1].imshow(np.linalg.norm(paf, axis = 0))
         
         
         #if gen.fold_skeleton:
-        if (ii < gen.n_affinity_maps_out - 1) or not gen.fold_skeleton:
+        if (ii < gen.n_affinity_maps_out) or not gen.fold_skeleton:
             s1 = skels[:, ii]
             s2 = skels[:, ii + gen.PAF_seg_dist]
         else:
@@ -531,11 +625,11 @@ if __name__ == '__main__':
         
         for ax in axs:
             ax.plot(sx, sy, 'r.-')
-        
-        
+            ax.axis('off')
+    
         #%%
                 
-    for ind in tqdm.trange(5):
+    for ind in tqdm.trange(1):
         image, target = gen_boxes._build_rand_img()
         image, target = gen_boxes._prepare_output(image, target)
         
@@ -556,7 +650,7 @@ if __name__ == '__main__':
             
             if p[0] >= 0:
                 plt.plot(p[0], p[1], 'or')
-             
+    
     #%%        
     for ind in tqdm.trange(5):
         image, target = gen_half_boxes._build_rand_img()
@@ -581,7 +675,7 @@ if __name__ == '__main__':
     #%%
         
       #%%
-    for ind in range(480, 485):#[491, 495]:
+    for ind in range(10, 20):
         image, target =  gen_val._read_worm(ind)
         image, target = gen_val._prepare_output(image, target)
         img = image[0] 

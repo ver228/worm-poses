@@ -92,10 +92,15 @@ class SerializedData():
         data_ind = 0
         keys = []
         
+        
+        dtype = np.float
+        ndims = 0
         for dat in array_lists:
             if dat is not None:
                 dtype = dat.dtype
                 ndims = dat.ndim
+                break
+                
         
         
         for i, dat in enumerate(array_lists):
@@ -202,13 +207,14 @@ def read_data_files( root_dir,
     return data
 
 
-def read_negative_data( src_file, 
+def read_negative_data( src_files, 
                  is_read_only = True
                  ):
-
-    src_file = Path(src_file)
-    with gzip.GzipFile(src_file, 'rb') as fid:
-        data_raw = pickle.load(fid)
+    data_raw = []
+    for src_file in src_files:
+        src_file = Path(src_file)
+        with gzip.GzipFile(src_file, 'rb') as fid:
+            data_raw += pickle.load(fid)
     
     data_raw = [(x,) for x in data_raw]
     data = SerializedData(data_raw, field_names = ['image'], is_read_only = is_read_only) 

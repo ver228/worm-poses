@@ -17,6 +17,7 @@ if __name__ == '__main__':
     
     src_postfix = '_unlinked-skels.hdf5'
     target_postfix = '_skeletonsNN.hdf5'
+    
     subdirs2check  = ['Bertie_movies', 
                       'Serena_WT_Screening', 
                       'Pratheeban', 
@@ -36,11 +37,18 @@ if __name__ == '__main__':
         for fname in dname.rglob('*' + src_postfix):
             target_file = fname.parent / (fname.name[:-len(src_postfix)] + target_postfix)
             if not target_file.exists():
-                files2process.append((fname, target_file))
+                files2process.append(fname)
     #%%
+    txt2save = []
+    for fname in files2process:
+        src_dir = str(fname.parent)
+        src_dir = src_dir.replace(str(Path.home()), '')
+        prefix = src_dir + '/' + fname.name
+        
+        txt2save.append(prefix)
+                
     with open(save_name, 'w') as fid:
-        txt2save = '\n'.join([f'"{x[0]}" "{x[1]}"' for x in files2process])
-        fid.write(txt2save)
+        fid.write('\n'.join(txt2save))
         
         
         

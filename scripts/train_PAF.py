@@ -8,8 +8,8 @@ Created on Fri Aug 17 17:05:49 2018
 
 import sys
 from pathlib import Path 
-root_dir = Path(__file__).resolve().parent.parent
-sys.path.append(str(root_dir))
+_src_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(_src_dir))
 
 from worm_poses.trainer import train_poses
 from worm_poses.flow import SkelMapsFlow, SkelMapsFlowValidation
@@ -26,23 +26,117 @@ import torch
 
 log_dir_root_dflt = Path.home() / 'workspace/WormData/worm-poses/results/'
 
-root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/'
+
 #root_dir = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training/'
 
-flow_args = dict(
-            data_types = ['from_tierpsy', 'manual'],
-             negative_src = 'from_tierpsy_negative.p.zip',
-             scale_int = (0, 255),
-             
-             roi_size = 256,
-                 crop_size_lims = (50, 180),
-                 negative_size_lims = (5, 180),
-                 n_rois_lims = (1, 3),
-                 int_expansion_range = (0.7, 1.3),
-                 int_offset_range = (-0.2, 0.2),
-                 blank_patch_range = (1/8, 1/3),
-                 zoom_range = None,
-            )
+data_types = dict(
+    v2 = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual'],
+                 negative_src = ['from_tierpsy_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 256,
+                     crop_size_lims = (50, 180),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 3),
+                     int_expansion_range = (0.7, 1.3),
+                     int_offset_range = (-0.2, 0.2),
+                     blank_patch_range = (1/8, 1/3),
+                     zoom_range = None,
+                )
+        ),
+    
+    v3 = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual', 'from_NNv1'],
+                 negative_src = ['from_tierpsy_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 320,
+                 crop_size_lims = (40, 224),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 6),
+                     int_expansion_range = (0.5, 1.3),
+                     int_offset_range = (-0.2, 0.3),
+                     blank_patch_range = (1/8, 1/4),
+                     zoom_range = None,
+                )
+        ),
+    v4 = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual', 'from_NNv1', 'manual-v2'],
+                 negative_src = ['from_tierpsy_negative.p.zip', 'from_hydra-bgnd_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 320,
+                 crop_size_lims = (25, 224),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 6),
+                     int_expansion_range = (0.5, 1.3),
+                     int_offset_range = (-0.2, 0.3),
+                     blank_patch_range = (1/8, 1/4),
+                     zoom_range = None,
+                )
+        ),
+    v4PAFflat = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/20190627_113423/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual', 'from_NNv1', 'manual-v2'],
+                 negative_src = ['from_tierpsy_negative.p.zip', 'from_hydra-bgnd_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 320,
+                 crop_size_lims = (25, 224),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 6),
+                     int_expansion_range = (0.5, 1.3),
+                     int_offset_range = (-0.2, 0.3),
+                     blank_patch_range = (1/8, 1/4),
+                     is_contour_PAF = False
+                )
+        ),
+    v5 = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/filtered_20200212/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual', 'from_NNv1'],
+                 negative_src = ['from_tierpsy_negative.p.zip', 'from_hydra-bgnd_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 320,
+                 crop_size_lims = (25, 224),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 6),
+                     int_expansion_range = (0.5, 1.3),
+                     int_offset_range = None,
+                     blank_patch_range = (1/8, 1/4),
+                     is_contour_PAF = False
+                )
+        ),
+    v5mixup = dict(
+        root_dir = Path.home() / 'workspace/WormData/worm-poses/rois4training/filtered_20200212/',
+        flow_args = dict(
+                data_types = ['from_tierpsy', 'manual', 'from_NNv1'],
+                 negative_src = ['from_tierpsy_negative.p.zip', 'from_hydra-bgnd_negative.p.zip'],
+                 scale_int = (0, 255),
+                 
+                 roi_size = 320,
+                 crop_size_lims = (25, 224),
+                     negative_size_lims = (5, 180),
+                     n_rois_lims = (1, 8),
+                     int_expansion_range = (0.5, 1.3),
+                     int_offset_range = None,
+                     mixup_probability = 0.25,
+                     blank_patch_range = (1/8, 1/4),
+                     is_contour_PAF = False
+                )
+        )
+    )
+
+
 
 #%%
 
@@ -127,17 +221,20 @@ def train_PAF(
             log_dir_root = log_dir_root_dflt,
             batch_size = 16,
             num_workers = 1,
-            roi_size = 96,
             loss_type = 'maxlikelihood',
             lr = 1e-4,
             weight_decay = 0.0,
             n_epochs = 1, #1000,
-            save_frequency = 200
+            save_frequency = 200,
+            init_model_path = None
             ):
     
     
-    log_dir = log_dir_root / data_type
+    d_args = data_types[data_type]
+    flow_args = d_args['flow_args']
+    root_dir = d_args['root_dir']
     
+    log_dir = log_dir_root / data_type
     
     return_bboxes = False
     return_half_bboxes = False
@@ -190,6 +287,12 @@ def train_PAF(
                                  )
         
     
+    if init_model_path is not None:
+        model_name = 'R+' + model_name
+        state = torch.load(init_model_path, map_location = 'cpu')
+        model.load_state_dict(state['state_dict'])
+    
+    
     device = get_device(cuda_id)
     lr_scheduler = None
     
@@ -213,7 +316,6 @@ def train_PAF(
         batch_size = batch_size,
         n_epochs = n_epochs,
         num_workers = num_workers,
-        init_model_path = None,
         save_frequency = save_frequency
         )
 

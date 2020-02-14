@@ -153,7 +153,7 @@ class OpenPoseCPM(nn.Module):
         paf_out = paf_out.reshape((N, self.n_affinity_maps, 2, w, h))
         return paf_out
       
-    def forward(self, xin):
+    def _forward(self, xin):
         feats = self.features(xin)
         
         # I am following the strategy of mask rcnn and interpolate data instead of undersample the target maps
@@ -184,6 +184,38 @@ class OpenPoseCPM(nn.Module):
         return pose_map, PAFs
     
     
+    
+    @staticmethod
+    def calculate_padding(x_shape, n_levels = 5):
+        # the input shape must be divisible by 32 otherwise it will be cropped due 
+        #to the way the upsampling in the network is done. Therefore it is better to path 
+        #the image and recrop it to the original size
+        nn = 2**n_levels
+        ss = [math.ceil(x/nn)*nn - x for x in x_shape]
+        pad_ = [(int(math.floor(x/2)),int(math.ceil(x/2))) for x in ss]
+        
+        #use pytorch for the padding
+        pad_ = [x for d in pad_[::-1] for x in d] 
+        pad_inv_ = [-x for x in pad_] 
+    
+        return pad_, pad_inv_
+    
+    def forward(self, x_input):
+        pad_, pad_inv_ = self.calculate_padding(x_input.shape[2:])
+        x_input = F.pad(x_input, pad_)
+        
+        pose_map, PAFs = self._forward(x_input)
+        
+        pose_map = F.pad(pose_map, pad_inv_)
+        if isinstance(PAFs, list):
+            PAFs = [F.pad(x, pad_inv_) for x in PAFs]
+        else:
+            PAFs = F.pad(PAFs, pad_inv_)
+            
+        return pose_map, PAFs
+        
+        
+    
 if __name__ == '__main__':
     #from losses import OpenPoseCPMLoss
     
@@ -193,7 +225,7 @@ if __name__ == '__main__':
     
     
     n_stages = 4
-    n_segments = 17
+    n_segments = 5
     n_affinity_maps = 15
     features_type = 'vgg11'
     

@@ -71,6 +71,7 @@ class BeliveMapsNMS(nn.Module):
                  threshold_rel = None, 
                  min_distance = 3,
                  max_num_peaks = 100
+                 
                  ):
         super().__init__()
         self.threshold_abs = threshold_abs
@@ -129,11 +130,13 @@ class BeliveMapsNMS(nn.Module):
         return outputs
 
 class PAFWeighter(nn.Module):
-    def __init__(self, keypoint_max_dist = 20, n_segments = 8, PAF_seg_dist = 1):
+    def __init__(self, keypoint_max_dist = 20, n_segments = 8, PAF_seg_dist = 1, n_points_integral = 10):
         super().__init__()
         self.n_segments = n_segments
         self.keypoint_max_dist = keypoint_max_dist
         self.PAF_seg_dist = PAF_seg_dist
+        self.n_points_integral = n_points_integral
+        #self.factors = np.linspace(0, 1, num = self.n_points_integral)
         
         
     def forward(self, skeletons, PAF):
@@ -156,13 +159,14 @@ class PAFWeighter(nn.Module):
             points_grouped.append((skels_inds[good], skels_xy[good]))
         
         edges = []
+        
+        N = self.n_points_integral - 1 
         for i1 in range(n_affinity_maps):
-            
-            if i1 < n_affinity_maps - 1:
-                i2 = i1 + self.PAF_seg_dist
-            else:
-                i2 = i1 - max(1, self.PAF_seg_dist//2)
-            
+            i2 = i1 + self.PAF_seg_dist
+            # if i1 < n_affinity_maps - 1:
+            #     i2 = i1 + self.PAF_seg_dist
+            # else:
+            #     i2 = i1 - max(1, self.PAF_seg_dist//2)
             
             p1_ind, p1_l = points_grouped[i1]
             p2_ind, p2_l = points_grouped[i2]
@@ -172,9 +176,11 @@ class PAFWeighter(nn.Module):
             
             p1 = p1_l[None].repeat(n_p2, 1,  1)
             p2 = p2_l[:, None].repeat(1, n_p1, 1)
-            midpoints = (p1 + p2)/2
             
-            inds = torch.stack((p1, p2, midpoints))
+            inds = [(p1*(N-x) + p2*x)/N for x in range(self.n_points_integral)]
+            inds = torch.stack(inds)
+            #midpoints = (p1 + p2)/2
+            #inds = torch.stack([p1, p2] +  midpoints))
             paf_vals = PAF[i1][:, inds[..., 1], inds[..., 0]] 
             
             p1_f, p2_f = p1.float(), p2.float()
@@ -218,10 +224,12 @@ class PoseDetector(nn.Module):
                  nms_threshold_abs = 0,
                  nms_threshold_rel = 0.01,
                  nms_min_distance = 1,
+                 keypoint_max_dist = 20,
+                 max_poses = 100,
                  
                  use_head_loss = False,
                  return_belive_maps = False,
-                 max_poses = 100
+                 
                  ):
         
         
@@ -231,6 +239,8 @@ class PoseDetector(nn.Module):
         self.nms_threshold_abs = nms_threshold_abs
         self.nms_threshold_rel = nms_threshold_rel
         self.nms_min_distance = nms_min_distance
+        self.max_poses = max_poses
+        self.keypoint_max_dist = keypoint_max_dist
         
         self.pose_loss_type = pose_loss_type
         self.n_segments = n_segments
@@ -257,7 +267,7 @@ class PoseDetector(nn.Module):
                                  nms_threshold_rel, 
                                  nms_min_distance,
                                  max_poses)
-        self.paf_weighter = PAFWeighter(keypoint_max_dist = 20, n_segments = n_segments)
+        self.paf_weighter = PAFWeighter(keypoint_max_dist = keypoint_max_dist, n_segments = n_segments)
         
         self.return_belive_maps = return_belive_maps
         
