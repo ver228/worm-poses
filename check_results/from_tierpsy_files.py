@@ -8,9 +8,6 @@ Created on Thu Jun 27 17:05:51 2019
 
 import sys
 from pathlib import Path 
-root_dir = Path(__file__).resolve().parent.parent
-sys.path.append(str(root_dir))
-
 import tables
 import torch
 from worm_poses.models import PoseDetector

@@ -1,0 +1,7 @@
+PAF_seg_dist : 1
+n_segments : 15
+n_stages : 6
+features_type : 'vgg19'
+use_head_loss : True
+fold_skeleton : True
+pose_loss_type : 'maxlikelihood'

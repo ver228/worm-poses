@@ -6,11 +6,6 @@ Created on Wed Dec  4 12:07:03 2019
 @author: avelinojaver
 """
 
-import sys
-from pathlib import Path 
-__root_dir = Path(__file__).resolve().parent.parent
-sys.path.append(str(__root_dir))
-
 import random
 import numpy as np
 import tables
@@ -19,7 +14,7 @@ import torch.nn.functional as F
 import tqdm
 import time
 import pandas as pd
-
+from pathlib import Path
 import multiprocessing as mp
 mp.set_start_method('spawn', force = True)
 

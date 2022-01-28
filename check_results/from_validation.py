@@ -8,9 +8,6 @@ Created on Thu Jun 27 17:05:51 2019
 
 import sys
 from pathlib import Path 
-_script_dir = Path(__file__).resolve().parents[1]
-sys.path.append(str(_script_dir))
-
 from worm_poses.models import PoseDetector
 
 import cv2

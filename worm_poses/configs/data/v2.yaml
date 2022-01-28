@@ -1,0 +1,27 @@
+data_types: 
+    - from_tierpsy
+    - manual
+negative_src : from_tierpsy_negative.p.zip
+scale_int: 
+    - 0
+    - 255
+roi_size : 256
+crop_size_lims : 
+    - 50
+    - 180
+negative_size_lims :
+    - 5
+    - 180
+n_rois_lims : 
+    - 1
+    - 3
+int_expansion_range:
+    - 0.7
+    - 1.3
+int_offset_range: 
+    - -0.2
+    - 0.2
+blank_patch_range: 
+    - 0.125
+    - 0.333
+zoom_range : null

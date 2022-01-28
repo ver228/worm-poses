@@ -1,0 +1,23 @@
+PAF_seg_dist : 1
+n_segments : 15
+n_stages : 4
+features_type : 'vgg11'
+use_head_loss : False
+fold_skeleton : False
+pose_loss_type : 'maxlikelihood+symetric'
+    'keypointrcnn+resnet50' : dict(
+            backbone : 'resnet50'
+            PAF_seg_dist : None
+            n_segments : 49
+            fold_skeleton : False
+            
+        )
+    'keypointrcnn+resnet18'  : dict(
+            backbone : 'resnet18'
+            PAF_seg_dist : None
+            n_segments : 49
+            fold_skeleton : False
+            
+        )
+    
+    }

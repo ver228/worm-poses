@@ -23,6 +23,16 @@ def _normalize_softmax(xhat):
     return hh
 
 def get_loc_loss(loss_type):
+    '''
+    Parser of the loss type to be used.
+
+    We can use either a maxlikelihood loss that maximizes the probability of the pixels with segments,
+    or we could generate a reference map by convolving the localization points with a gaussian and 
+    calculating the MSE.
+
+    TODO -> this is a bit complex, since we are only using maxlikelihood we probably remove the rest.
+
+    '''
     criterion = None
     if loss_type == 'maxlikelihood':
         criterion = MaximumLikelihoodLoss()

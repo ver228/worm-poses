@@ -1,0 +1,4 @@
+backbone : 'resnet50'
+PAF_seg_dist : None
+n_segments : 49
+fold_skeleton : False

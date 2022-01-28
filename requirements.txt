@@ -1,0 +1,7 @@
+torch
+torchvision
+pyyaml
+numpy
+opencv-python-headless
+tensorboard
+tqdm
