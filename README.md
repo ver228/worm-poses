@@ -1,6 +1,6 @@
 # worm-poses
 
-## Installation
+## Installation
 
 Clone this repo and inside it execute.
 ```
