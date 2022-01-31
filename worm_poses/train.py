@@ -10,7 +10,7 @@ from pathlib import Path
 from argparse import ArgumentParser
 
 from .engines import train_poses
-from .data import SkelMapsFlow, SkelMapsFlowValidation
+from .data import SkelMapsFlow, SkelMapsFlowValidation, get_outputs_sizes
 from .models import PoseDetector, get_keypointrcnn
 from .utils import get_device
 from .configs import read_flow_config, read_model_config
@@ -30,8 +30,32 @@ def save_metadata(opt : ArgumentParser, save_dir : Path):
     with open(fname, 'w') as fid:
         yaml.safe_dump(opt.__dict__, fid)
 
+def get_model_from_args(conf_args):
+    n_segments_out, n_affinity_maps_out = get_outputs_sizes(n_segments=conf_args['n_segments'], 
+                                                            PAF_seg_dist = conf_args['PAF_seg_dist'], 
+                                                            fold_skeleton = conf_args['fold_skeleton']
+                                       )
+    if 'backbone' in conf_args:
+        return get_keypointrcnn(backbone = conf_args['backbone'],
+                                 num_classes = 2, 
+                                 num_keypoints = n_segments_out
+        )
+    else:
+        return PoseDetector(
+                n_segments = n_segments_out, 
+                n_affinity_maps = n_affinity_maps_out, 
+                n_stages = conf_args['n_stages'],
+                features_type = conf_args['features_type'],
+                use_head_loss = conf_args['use_head_loss'],
+                pose_loss_type = conf_args['pose_loss_type']
+                )
+
+    
+
 def train(opt):
     flow_args = read_flow_config(opt.flow_config)
+    conf_args = read_model_config(opt.model_config)
+    
     data_dir = Path(opt.data_dir)
     
     log_dir = Path(opt.save_dir) / opt.flow_config
@@ -45,15 +69,14 @@ def train(opt):
             return_bboxes = True
             
     
-    model_args = read_model_config(opt.model_config)
     train_flow = SkelMapsFlow(root_dir = data_dir, 
                              set2read =  'train', 
                              #set2read = 'validation',
                              samples_per_epoch = opt.samples_per_epoch,
                              return_key_value_pairs = True,
-                             PAF_seg_dist = model_args['PAF_seg_dist'],
-                             n_segments = model_args['n_segments'],
-                             fold_skeleton = model_args['fold_skeleton'],
+                             PAF_seg_dist = conf_args['PAF_seg_dist'],
+                             n_segments = conf_args['n_segments'],
+                             fold_skeleton = conf_args['fold_skeleton'],
                              return_bboxes = return_bboxes,
                              return_half_bboxes = return_half_bboxes,
                              **flow_args
@@ -62,34 +85,17 @@ def train(opt):
     val_flow = SkelMapsFlowValidation(root_dir = data_dir, 
                              set2read = 'validation',
                              return_key_value_pairs = True,
-                             PAF_seg_dist = model_args['PAF_seg_dist'],
-                             n_segments = model_args['n_segments'],
-                             fold_skeleton = model_args['fold_skeleton'],
+                             PAF_seg_dist = conf_args['PAF_seg_dist'],
+                             n_segments = conf_args['n_segments'],
+                             fold_skeleton = conf_args['fold_skeleton'],
                              return_bboxes = return_bboxes,
                              return_half_bboxes = return_half_bboxes,
                              **flow_args
                              )
-    
-    if 'openpose' in opt.model_config:
-        model = PoseDetector(
-                n_segments = train_flow.n_segments_out, 
-                n_affinity_maps = train_flow.n_affinity_maps_out, 
-                n_stages = model_args['n_stages'],
-                features_type = model_args['features_type'],
-                use_head_loss = model_args['use_head_loss'],
-                pose_loss_type = model_args['pose_loss_type']
-                )
-    else:
-        model = get_keypointrcnn(backbone = model_args['backbone'],
-                                 num_classes = 2, 
-                                 num_keypoints = train_flow.n_segments_out
-                                 )
-        
-    
+    model = get_model_from_args(conf_args)
     if opt.init_model_path:
         state = torch.load(opt.init_model_path, map_location = 'cpu')
         model.load_state_dict(state['state_dict'])
-    
     
     device = get_device(opt.cuda_id)
     lr_scheduler = None

@@ -1,34 +1,11 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Dec  4 12:07:03 2019
-
-@author: avelinojaver
-"""
-
-import sys
-from pathlib import Path 
-_script_dir = Path(__file__).resolve().parent.parent
-sys.path.append(str(_script_dir))
-
-import random
 import numpy as np
 import tables
 import torch
 import pandas as pd
 from collections import defaultdict
+from .process_base import init_reader
+from .readers import init_reader, read_images_from_tierpsy
 
-import multiprocessing as mp
-mp.set_start_method('spawn', force = True)
-
-from worm_poses.utils import get_device
-from worm_poses.models import PoseDetector
-
-from process_with_PAF import _init_reader, get_model_arguments
-
-
-        
-#%%
 def _get_roi_limits(skel_preds, roi_size, img_lims, corner = None):
     cm = [np.median(p[:, -2:], axis=0).round().astype(np.int) for p in skel_preds]
     cm = np.mean(cm, axis=0)  
@@ -67,9 +44,6 @@ def predictions2skeletons(preds,
     PAF_cost = PAF_cost[valid]
     edges_indeces = edges_indeces[:, valid]
     
-    
-    
-    
     inds = np.argsort(PAF_cost)[::-1]
     edges_indeces = edges_indeces[:, inds]
     _, valid_index =  np.unique(edges_indeces[0], return_index = True )
@@ -100,11 +74,6 @@ def predictions2skeletons(preds,
             import pdb
             pdb.set_trace()
         segments_linked += [[points[x]] for x in new_points]
-    
-    # if _frame2test == 143:
-    #     import pdb
-    #     pdb.set_trace()
-        
     
     if is_skel_half:
         skeletons = []
@@ -158,9 +127,7 @@ class predictionsAccumulator():
             
             self.current_poind_id += N
     
-            
-    
-    
+
     def save(self, save_name):
         points_df = pd.DataFrame(self.points, columns = ['point_id', 'frame_number', 'segment_id', 'x', 'y', 'score'])
         edges_df = pd.DataFrame(self.edges, columns = ['frame_number', 'point1', 'point2', 'cost_PAF', 'cost_R'])
@@ -180,7 +147,7 @@ class predictionsAccumulator():
             fid.create_table('/', 'edges', obj = edges_rec, filters = TABLE_FILTERS)
 
 #%%
-def _process_from_reader_single(queue_images, save_name, model, device, full_batch_size = 2 ):
+def process_from_reader_single(queue_images, save_name, model, device, roi_size=256, full_batch_size = 2 ):
     
     pred_acc = predictionsAccumulator()
     
@@ -246,77 +213,10 @@ def _process_from_reader_single(queue_images, save_name, model, device, full_bat
            
     pred_acc.save(save_name)
 
-
-
-def _process_file(mask_file, save_name, model, device, batch_size, images_queue_size = 4):
-    reader_p, queue_images = _init_reader(mask_file, batch_size, device, images_queue_size)
+def process_WT2_file(mask_file, save_name, model, device, batch_size, roi_size=256, images_queue_size = 4):
+    reader_p, queue_images = init_reader(read_images_from_tierpsy, mask_file, batch_size, device, images_queue_size)
     try:
-        _process_from_reader_single(queue_images, save_name, model, device)
+        process_from_reader_single(queue_images, save_name, model, device, roi_size=roi_size)
     except Exception as e:
         reader_p.terminate()
         raise e
-
-    
-if __name__ == '__main__':
-    #bn = 'v2_openpose+light_maxlikelihood_20191211_150642_adam_lr0.0001_wd0.0_batch32'
-    #bn = 'v2_openpose+light+fullsym_maxlikelihood_20191229_223132_adam_lr0.0001_wd0.0_batch22'
-    #bn = 'v2_openpose+head_maxlikelihood_20191223_105436_adam_lr0.0001_wd0.0_batch28'
-    #bn = 'v2_openpose+light+fullsym_maxlikelihood_20191229_223132_adam_lr0.0001_wd0.0_batch22'
-    #bn = 'v2_openpose+light+head_maxlikelihood_20191219_144819_adam_lr0.0001_wd0.0_batch32'
-    #bn = 'v3_openpose+light+head_maxlikelihood_20200118_100732_adam_lr0.0001_wd0.0_batch24'
-    bn = 'v4PAFflat_openpose+light+head_maxlikelihood_20200206_105708_adam_lr0.0001_wd0.0_batch24'
-    
-    set_type = bn.partition('_')[0]
-    model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'model_best.pth.tar'
-    
-    
-    cuda_id = 0
-    device = get_device(cuda_id)
-    batch_size = 64
-    roi_size = 256
-    
-    images_queue_size = 2
-    results_queue_size = 4
-    
-    model_args = get_model_arguments(bn)
-    #%%
-    model = PoseDetector(**model_args)
-    state = torch.load(model_path, map_location = 'cpu')
-    model.load_state_dict(state['state_dict'])
-    model.eval()
-    model = model.to(device)
-    
-    #%%
-    root_dir = Path.home() / 'workspace/WormData/screenings/Bertie_movies'
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/Bertie_movies')
-    
-    mask_dir = root_dir / 'MaskedVideos'
-    save_root_dir = root_dir / ('ResultsNN_' + bn)
-    
-    #mask_files = list(mask_dir.rglob('JU2565_Ch2_27082017_112328*.hdf5'))
-    mask_files = list(mask_dir.rglob('*.hdf5'))
-    random.shuffle(mask_files)
-    
-    unprocessed_files = []
-    for mask_file in mask_files:
-        bn = mask_file.stem
-        save_dir = Path(str(mask_file.parent).replace(str(mask_dir), str(save_root_dir)))
-        save_dir.mkdir(exist_ok = True, parents = True)
-        save_name = save_dir / (mask_file.stem + '_unlinked-skels.hdf5') 
-        
-        #_process_file(mask_file, save_name, model, device, batch_size)
-        if save_name.exists():
-            continue
-        try:
-            _process_file(mask_file, save_name, model, device, batch_size)
-            with tables.File(save_name, 'r+') as fid:
-                fid.get_node('/points')._v_attrs['src_model'] = str(bn)
-            
-        except Exception as e:
-            unprocessed_files.append((mask_file, str(e)))
-    
-    
-        #I couldn't process the following files
-    for fname, e in unprocessed_files:
-        print(fname)
-        print(e)

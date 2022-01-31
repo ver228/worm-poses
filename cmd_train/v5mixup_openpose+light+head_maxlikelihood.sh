@@ -3,10 +3,10 @@ SAVEDIR=$HOME/worm_models
 
 python -m worm_poses.train \
 --n_epochs 3000 \
---data_type 'v5mixup' \
+--flow_config 'v5mixup' \
 --data_dir $DATADIR \
 --save_dir $SAVEDIR \
---model_name 'openpose+light+head' \
+--model_config 'openpose+light+head' \
 --loss_type 'maxlikelihood' \
 --batch_size 24 \
 --num_workers 8 \

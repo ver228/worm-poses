@@ -2,13 +2,13 @@ DATADIR='/Users/avelino/Library/CloudStorage/OneDrive-ImperialCollegeLondon/OXFO
 SAVEDIR=$HOME/worm_models
 
 python -m worm_poses.train \
---n_epochs 3000 \
---data_type 'v5' \
 --data_dir $DATADIR \
 --save_dir $SAVEDIR \
---model_name 'openpose+light+head' \
+--n_epochs 1000 \
+--flow_config 'v2' \
+--model_config 'keypointrcnn+resnet18' \
 --loss_type 'maxlikelihood' \
---batch_size 24 \
---num_workers 8 \
+--batch_size 28 \
+--num_workers 4 \
 --lr 1e-4 \
---save_frequency 600
+--save_frequency 200

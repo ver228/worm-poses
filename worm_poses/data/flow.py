@@ -157,7 +157,6 @@ class SkelMapsFlow(Dataset):
         self.PAF_seg_dist = PAF_seg_dist
         self.is_contour_PAF = is_contour_PAF
         self.n_segments = n_segments
-        
         self.n_segments_out, self.n_affinity_maps_out = get_outputs_sizes(n_segments, PAF_seg_dist, fold_skeleton)
         
         self.root_dir = Path(root_dir)

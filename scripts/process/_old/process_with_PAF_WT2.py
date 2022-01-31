@@ -15,23 +15,6 @@ if __name__ == '__main__':
     #bn = 'v2_openpose+light_maxlikelihood_20191211_150642_adam_lr0.0001_wd0.0_batch32'
     bn = 'v4PAFflat_openpose+light+head_maxlikelihood_20200206_105708_adam_lr0.0001_wd0.0_batch24'
     
-    model_name = bn.split('_')[1]
-    if '+light' in model_name:
-        model_args = dict(
-            n_segments = 8,
-            n_affinity_maps = 8,
-            features_type = 'vgg11',
-            n_stages = 4,
-        )
-    else:
-        model_args = dict(
-            n_segments = 8,
-            n_affinity_maps = 8,
-            features_type = 'vgg19',
-            n_stages = 6,
-        )
-    model_args['use_head_loss'] = '+head' in model_name
-    
     set_type = bn.partition('_')[0]
     model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'model_best.pth.tar'
     
@@ -42,7 +25,7 @@ if __name__ == '__main__':
     
     cuda_id = 0
     device = get_device(cuda_id)
-   #36#16#
+    #36#16#
     
     #%%
     resize_factor = 0.5

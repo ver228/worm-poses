@@ -2,7 +2,8 @@ data_types:
     - from_tierpsy
     - manual
     - from_NNv1
-negative_src : from_tierpsy_negative.p.zip
+negative_src : 
+    - from_tierpsy_negative.p.zip
 scale_int: 
     - 0
     - 255

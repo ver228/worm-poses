@@ -953,8 +953,8 @@ def save_skeletons(skeletons_data, save_file):
     
 
 
-def _process_file(unlinked_segments_file, 
-                  save_file, 
+def link_segments_file(unlinked_segments_file, 
+                  linked_segments_file, 
                   n_segments = 8, 
                   fps = 25,
                   smooth_window_s = 0.25,
@@ -977,37 +977,33 @@ def _process_file(unlinked_segments_file,
                                       fps = fps, 
                                       target_n_segments = target_n_segments)
     
-    save_skeletons(skeletons, save_file) 
+    save_skeletons(skeletons, linked_segments_file) 
     return skeletons
 
-if __name__ == '__main__':
+def unlinked2linked_skeletons(fname, 
+                              unlinked_ext = '_unlinked-skels.hdf5',
+                              linked_ext = '_skeletonsNN.hdf5',
+                              overwrite=True
+                            ):
+    save_file = fname.parent / fname.name.replace(unlinked_ext, linked_ext)
+    if save_file.exist() and (not overwrite):
+        print('File `save_file` exist, i am skipping it. Set the variable `overwrite=True`.')
+    else:
+        return link_segments_file(fname, save_file)
+
+def _debug_main():
     import random
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/mating')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Bertie_movies/Results')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/WT2')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Serena_WT_Screening')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Syngenta')
-    #root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/Pratheeban')
     root_dir = Path('/Users/avelinojaver/OneDrive - Nexus365/worms/movies/hydra_example_for_Avelino/LoopBio_ResultsNN_v4PAFflat_openpose+light+head_maxlikelihood_20200206_105708_adam_lr0.0001_wd0.0_batch24')
     
     assert root_dir.exists()
-    #unlinked_segments_file = root_dir / (bn + '_unlinked-skels-rois.hdf5')
-    #skel_file = unlinked_file = root_dir / (bn + '_skeletonsNN.hdf5')
-    #_process_file(unlinked_segments_file, skel_file)
-    
     _ext = '_unlinked-skels.hdf5'
-    ext2save = '_skeletonsNN.hdf5'
-    #files2process = list(root_dir.rglob('*' + _ext))
     files2process = list(root_dir.rglob('*' + _ext))
     
     #files2process = list(root_dir.rglob('JU792_Ch1_24092017_063115' + _ext))
     
     random.shuffle(files2process)
     for fname in tqdm.tqdm(files2process):
-        save_file = fname.parent / fname.name.replace(_ext, ext2save)
-        if save_file.exists():
-            continue
+        unlinked2linked_skeletons(fname)
         
-        skeletons = _process_file(fname, save_file)
-        
-    
+if __name__ == '__main__':
+    _debug_main()

@@ -188,7 +188,3 @@ if __name__ == '__main__':
         axs[1][3].imshow(np.linalg.norm(paf[-1], axis = 0))
 
         plt.suptitle(bn)
-
-        #%%
-        # break
-        

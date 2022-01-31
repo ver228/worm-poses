@@ -55,7 +55,6 @@ def train_one_epoch(basename, model, optimizer, lr_scheduler, data_loader, devic
         
         losses = model(images, targets)
         
-        
         loss = sum([x for x in losses.values()])
         optimizer.zero_grad()
         loss.backward()
