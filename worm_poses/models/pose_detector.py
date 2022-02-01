@@ -187,7 +187,7 @@ class PAFWeighter(nn.Module):
             p1 = p1_l[None].repeat(n_p2, 1,  1)
             p2 = p2_l[:, None].repeat(1, n_p1, 1)
             
-            inds = [(p1*(N-x) + p2*x)/N for x in range(self.n_points_integral)]
+            inds = [(p1*(N-x) + p2*x)//N for x in range(self.n_points_integral)]
             inds = torch.stack(inds)
             #midpoints = (p1 + p2)/2
             #inds = torch.stack([p1, p2] +  midpoints))
