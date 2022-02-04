@@ -1,4 +1,4 @@
-from .link_skeletons import unlinked2linked_skeletons
+from .link_skeletons import unlinked2linked_skeletons, link_segments_single_frame
 from .loader import load_model
 from .process_base import process_file
 from .process_WT2 import process_WT2_file

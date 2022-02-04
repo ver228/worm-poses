@@ -16,6 +16,62 @@ from scipy.optimize import linear_sum_assignment
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
     
+def link_segments_single_frame(predictions, 
+                n_segments = 8,
+                min_PAF = 0.25
+                ):
+    """[summary]
+    Simplified version of the linkage algorithm that works on single frames.
+    It is intedent to be used as for debugging.
+    Args:
+        predictions ([type]): [Predictions from a pose detection network]
+        n_segments (int, optional): [number of expected segments]. Defaults to 8.
+        min_PAF (float, optional): [description]. Defaults to 0.25.
+
+    Returns:
+        [type]: [description]
+    """    
+    edges_cost = predictions['edges_costs']
+    edges_indeces = predictions['edges_indices']
+    points = predictions['skeletons']
+    
+    #get the best matches per point
+    PAF_cost = edges_cost[0]
+    valid = PAF_cost >= min_PAF
+    PAF_cost = PAF_cost[valid]
+    edges_indeces = edges_indeces[:, valid]
+    
+    inds = np.argsort(PAF_cost)[::-1]
+    edges_indeces = edges_indeces[:, inds]
+    _, valid_index =  np.unique(edges_indeces[0], return_index = True )
+    best_matches = {x[0]:x[1] for x in edges_indeces[:, valid_index].T}
+    matched_points = set(best_matches.keys())
+    
+    assert (edges_indeces < len(points)).all()
+    points =  np.concatenate((np.arange(len(points))[:, None], points), axis=1)     
+    
+    #%%
+    #add the point_id column 
+    segments_linked = []
+    for ipoint in range(n_segments):
+        points_in_segment = points[points[:, 1] == ipoint]
+        
+        prev_inds = {x[-1][0]:x for x in segments_linked}
+        
+        matched_indices_prev = list(set(prev_inds.keys()) & matched_points)
+        matched_indices_cur = [best_matches[x] for x in matched_indices_prev]
+    
+        new_points = set(points_in_segment[:, 0]) - set(matched_indices_cur)
+    
+        for k1, k2 in zip(matched_indices_prev, matched_indices_cur):
+            prev_inds[k1].append(points[k2])
+        
+        segments_linked += [[points[x]] for x in new_points]
+        
+        #%%
+    return segments_linked
+
+
 def _get_best_edge_match(_edges, min_PAF = 0.25):
     _edges = _edges[_edges['cost_PAF'] >= min_PAF]
 
