@@ -80,7 +80,8 @@ def process_from_validation_data(model_path, validation_set_path, inds2process, 
         n_segments (int, optional): [description]. Defaults to 8.
     """    
     device = get_device(cuda_id)
-    model = load_model(model_path, device)
+    extra_args = {'return_belive_maps' : True}
+    model = load_model(model_path, device, extra_args=extra_args)
     model.eval()
     
 

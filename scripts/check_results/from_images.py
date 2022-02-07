@@ -17,16 +17,15 @@ from worm_poses.utils import get_device
 from worm_poses.inference import load_model, link_segments_single_frame
 
 def process_single_image(model, fname, scale_factor=1, n_segments=8):
-    img = cv2.imread(str(fname), -1)
+    img = cv2.imread(str(fname), cv2.IMREAD_GRAYSCALE)
     img = img.astype(np.float32)/img.max()
-    
     X = torch.from_numpy(img).float()[None, None]
     
     if scale_factor != 1.:
         #rescale the image if it is too different from the expected size from the training set
         X = torch.nn.functional.interpolate(X, scale_factor = scale_factor)
-    
     predictions, belive_maps = model(X)
+    
     predictions = [{k : v.detach().cpu().numpy() for k,v in p.items()} for p in predictions]
     
     segments = link_segments_single_frame(predictions[0], n_segments=n_segments)
@@ -67,7 +66,8 @@ def process_from_images(model_path, fnames, cuda_id=0, scale_factor = 1., n_segm
     """    
 
     device = get_device(cuda_id)
-    model = load_model(model_path, device)
+    extra_args = {'return_belive_maps' : True}
+    model = load_model(model_path, device, extra_args=extra_args)
     model.eval()
     
     
@@ -75,8 +75,8 @@ def process_from_images(model_path, fnames, cuda_id=0, scale_factor = 1., n_segm
         process_single_image(model, fname, scale_factor=scale_factor, n_segments=n_segments)
 
 if __name__ == '__main__':
-    model_path = ''
-    root_dir = Path('/Users/avelinojaver/Downloads/BBBC010_v1_images/')
-    fnames = list(root_dir.glob('*w2*.tif'))[:10]
+    model_path = Path('/Users/avelino/Downloads/Save_model/v5/v5_openpose_maxlikelihood_20220131_160257/model_best.pth.tar')
+    root_dir = Path('/Users/avelino/Downloads/Images')
+    fnames = list(root_dir.glob('*png'))[:1]
     
     process_from_images(model_path, fnames)

@@ -4,7 +4,7 @@ import torch
 from worm_poses.train import get_model_from_args
 from worm_poses.configs import read_model_config
 
-def load_model(model_path : Union[str, Path], device):
+def load_model(model_path : Union[str, Path], device, extra_args : dict ={}):
     #I am assuming the model type is a prefix on the subfolder containing the model
     #TODO in a future i should read the configuration file directly.
     model_path = Path(model_path)
@@ -12,7 +12,7 @@ def load_model(model_path : Union[str, Path], device):
     model_name = basename.split('_')[1]
     
     conf_args = read_model_config(model_name)
-    model = get_model_from_args(conf_args)
+    model = get_model_from_args(conf_args, extra_args=extra_args)
 
     state = torch.load(model_path, map_location = 'cpu')
     model.load_state_dict(state['state_dict'])

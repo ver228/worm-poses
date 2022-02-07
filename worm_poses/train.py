@@ -30,7 +30,7 @@ def save_metadata(opt : ArgumentParser, save_dir : Path):
     with open(fname, 'w') as fid:
         yaml.safe_dump(opt.__dict__, fid)
 
-def get_model_from_args(conf_args):
+def get_model_from_args(conf_args, extra_args={}):
     n_segments_out, n_affinity_maps_out = get_outputs_sizes(n_segments=conf_args['n_segments'], 
                                                             PAF_seg_dist = conf_args['PAF_seg_dist'], 
                                                             fold_skeleton = conf_args['fold_skeleton']
@@ -38,7 +38,8 @@ def get_model_from_args(conf_args):
     if 'backbone' in conf_args:
         return get_keypointrcnn(backbone = conf_args['backbone'],
                                  num_classes = 2, 
-                                 num_keypoints = n_segments_out
+                                 num_keypoints = n_segments_out,
+                                 **extra_args
         )
     else:
         return PoseDetector(
@@ -47,7 +48,8 @@ def get_model_from_args(conf_args):
                 n_stages = conf_args['n_stages'],
                 features_type = conf_args['features_type'],
                 use_head_loss = conf_args['use_head_loss'],
-                pose_loss_type = conf_args['pose_loss_type']
+                pose_loss_type = conf_args['pose_loss_type'],
+                **extra_args
                 )
 
     

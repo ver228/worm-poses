@@ -59,7 +59,6 @@ def process_single_img(model, img):
             xmin, ymin, xmax, ymax = bbox.round().int().numpy()
             roi = img[ ymin:ymax, xmin:xmax]
             
-            
             fig_keypoints, axs = plt.subplots(1, 2, sharex=True, sharey=True)
             axs[0].imshow(roi)
             axs[1].imshow(mm_max)

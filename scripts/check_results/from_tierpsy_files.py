@@ -24,9 +24,11 @@ def process_w_box_detection(model_path, mask_file, cuda_id = 0, frame2read = 0, 
         cuda_id (int, optional): [gpu id to be used]. Defaults to 0.
         frame2read (int, optional): [frame number in the mask file to be read]. Defaults to 0.
         field2read (str, optional): [field in the mask file to be read]. Defaults to '/full_data'.
-    """    
+    """   
+     
     device = get_device(cuda_id)
-    model = load_model(model_path, device)
+    extra_args = {'return_belive_maps' : True}
+    model = load_model(model_path, device, extra_args=extra_args)
     model.eval()
     
     mask_file = Path(mask_file)
