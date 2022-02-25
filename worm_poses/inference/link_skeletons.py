@@ -1015,7 +1015,11 @@ def link_segments_file(unlinked_segments_file,
                   fps = 25,
                   smooth_window_s = 0.25,
                   max_gap_btw_traj_s = 0.5,
-                  target_n_segments = 49
+                  target_n_segments = 49,
+                  max_frac_dist_btw_half = 0.5,
+                  max_frac_dist_btw_seg = 0.125,
+                  max_frac_dist_btw_skels = 0.25
+
                   ):
     
     with tables.File(unlinked_segments_file) as fid:
@@ -1024,14 +1028,31 @@ def link_segments_file(unlinked_segments_file,
     
     max_gap_btw_traj = max(int(round(max_gap_btw_traj_s*fps)), 1)
     
-    skeletons = link_skeletons(points, edges, n_segments = n_segments)
-    skeletons = join_trajectories(skeletons, max_gap = max_gap_btw_traj, max_frac_dist = 2/n_segments)
-    skeletons = correct_headtail(skeletons, fps)
+    skeletons = link_skeletons(points, 
+                              edges, 
+                              n_segments = n_segments,
+                              max_frac_dist_half = max_frac_dist_btw_half,
+                              max_frac_dist_seg = max_frac_dist_btw_seg
+                              )
+                              
+    skeletons = join_trajectories(skeletons, 
+                                  max_gap = max_gap_btw_traj, 
+                                  max_frac_dist = max_frac_dist_btw_skels
+                                  )
+    
+    skeletons = correct_headtail(skeletons, 
+                                fps=fps,
+                                min_len_NN_s=10,  
+                                min_len_movement_s=30, 
+                                max_traj_gap_s=max_gap_btw_traj_s
+                                )
     
     skeletons = smooth_skeletons(skeletons, 
                                       smooth_window_s = smooth_window_s, 
                                       fps = fps, 
-                                      target_n_segments = target_n_segments)
+                                      target_n_segments = target_n_segments,
+                                      max_gap_btw_traj_s=max_gap_btw_traj_s
+                                      )
     
     save_skeletons(skeletons, linked_segments_file) 
     return skeletons
@@ -1039,13 +1060,14 @@ def link_segments_file(unlinked_segments_file,
 def unlinked2linked_skeletons(fname, 
                               unlinked_ext = '_unlinked-skels.hdf5',
                               linked_ext = '_skeletonsNN.hdf5',
-                              overwrite=True
+                              overwrite=True,
+                              **argkws
                             ):
     save_file = fname.parent / fname.name.replace(unlinked_ext, linked_ext)
     if save_file.exist() and (not overwrite):
         print('File `save_file` exist, i am skipping it. Set the variable `overwrite=True`.')
     else:
-        return link_segments_file(fname, save_file)
+        return link_segments_file(fname, save_file, **argkws)
 
 def _debug_main():
     import random

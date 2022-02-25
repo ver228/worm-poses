@@ -19,7 +19,6 @@ from worm_poses.inference import load_model
 
 def process_single_img(model, img):
     img = img.astype(np.float32)/255.
-        
     #X = torch.from_numpy(np.repeat(img[None], 3, axis=0)).float()[None]
     X = torch.from_numpy(img[None]).float()[None]
     

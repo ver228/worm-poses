@@ -77,6 +77,7 @@ def process_from_images(model_path, fnames, cuda_id=0, scale_factor = 1., n_segm
 if __name__ == '__main__':
     model_path = Path('/Users/avelino/Downloads/Save_model/v5/v5_openpose_maxlikelihood_20220131_160257/model_best.pth.tar')
     root_dir = Path('/Users/avelino/Downloads/Images')
-    fnames = list(root_dir.glob('*png'))[:1]
+    fnames = list(root_dir.glob('*png'))[15:19]
+
     
     process_from_images(model_path, fnames)
