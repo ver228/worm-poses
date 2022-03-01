@@ -42,3 +42,21 @@ There are more examples of training configs in the folder `train_cmd`.
 
 ![Example2](https://user-images.githubusercontent.com/8364368/156197733-6e71c764-f6c3-44ac-8d78-3c4d0ebc3ed3.png)
 
+
+
+## Evaluation on worm movies
+
+You can evaluated the models on tierpsy movies (https://github.com/Tierpsy/tierpsy-tracker) as
+
+```
+python -m worm_poses.eval \
+--model_path $MODEL_PATH \
+--src_file $SRC_FILE \
+--reader_type 'tierpsy' \
+--save_dir $SAVEDIR \
+--batch_size 2 \
+--images_queue_size 2
+```
+
+Where MODEL_PATH is the path for a pretrained model, SRC_FILE is the path to source video file, SAVEDIR is where the results are going to be saved.
+
