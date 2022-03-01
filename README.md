@@ -32,3 +32,13 @@ python -m worm_poses.train \
 ```
 
 There are more examples of training configs in the folder `train_cmd`.
+
+
+
+## Prediction Examples
+
+![Example1](https://user-images.githubusercontent.com/8364368/156197436-e231d19a-6387-4dcb-b6bd-f7715bcad870.png)
+
+
+![Example2](https://user-images.githubusercontent.com/8364368/156197733-6e71c764-f6c3-44ac-8d78-3c4d0ebc3ed3.png)
+
