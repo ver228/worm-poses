@@ -18,6 +18,8 @@ from worm_poses.inference import load_model, link_segments_single_frame
 
 def process_single_image(model, fname, scale_factor=1, n_segments=8):
     img = cv2.imread(str(fname), cv2.IMREAD_GRAYSCALE)
+    img = img[2000:2200, 1000:1150]
+    
     img = img.astype(np.float32)/img.max()
     X = torch.from_numpy(img).float()[None, None]
     
@@ -42,18 +44,26 @@ def process_single_image(model, fname, scale_factor=1, n_segments=8):
     paf_max = np.linalg.norm(paf, axis = 1).max(axis=0)
     
     fig, axs = plt.subplots(1,3, figsize = (30, 10), sharex = True, sharey = True)
+    
+    
     for ax in axs:
         ax.imshow(img, cmap='gray')
         ax.axis('off')
-        
+    
     for ii in range(model.n_segments):
         valid = skels[..., 0] == ii
-        axs[1].plot(skels[valid, -2], skels[valid, -1], '.')
+        axs[1].plot(skels[valid, -2], skels[valid, -1], 'o')
     
     for seg in segments:
         seg = seg[:, -2:]/ scale_factor
-        axs[2].plot(seg[:, -2], seg[:, -1], '-')
-        
+        axs[2].plot(seg[:, -2], seg[:, -1], '.-')
+    
+    fontsize=30
+    axs[0].set_title('raw', fontsize=fontsize)
+    axs[1].set_title('landmarks', fontsize=fontsize)
+    axs[2].set_title('linked skeleton halves', fontsize=fontsize)
+    return fig
+
 def process_from_images(model_path, fnames, cuda_id=0, scale_factor = 1., n_segments = 8):
     """[summary]
 
@@ -72,12 +82,13 @@ def process_from_images(model_path, fnames, cuda_id=0, scale_factor = 1., n_segm
     
     
     for ifname, fname in enumerate(tqdm.tqdm(fnames)):
-        process_single_image(model, fname, scale_factor=scale_factor, n_segments=n_segments)
+        fig = process_single_image(model, fname, scale_factor=scale_factor, n_segments=n_segments)
+        fig.savefig(f'I{ifname}.png')
 
 if __name__ == '__main__':
     model_path = Path('/Users/avelino/Downloads/Save_model/v5/v5_openpose_maxlikelihood_20220131_160257/model_best.pth.tar')
     root_dir = Path('/Users/avelino/Downloads/Images')
-    fnames = list(root_dir.glob('*png'))[15:19]
+    fnames = list(sorted(root_dir.glob('*png')))
 
     
     process_from_images(model_path, fnames)

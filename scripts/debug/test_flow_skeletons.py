@@ -36,7 +36,7 @@ if __name__ == '__main__':
     tic = time.time()
     
     roi_size = 128
-    _is_plot = False
+    _is_plot = True
     
     root_dir = '/Users/avelino/Library/CloudStorage/OneDrive-ImperialCollegeLondon/OXFORD/onedrive_nexus/worms/worm-poses/rois4training_filtered'
     
@@ -68,20 +68,20 @@ if __name__ == '__main__':
                 assert x.shape == (1, gen.roi_size, gen.roi_size)
                 
                 
-                fig, axs = plt.subplots(1, 3, figsize = figsize, sharex = True, sharey = True)
+                fig, axs = plt.subplots(1, 4, figsize = figsize, sharex = True, sharey = True)
                 n_figs += 1
                 axs[0].imshow(x[0], cmap = 'gray', vmin = 0.0, vmax = 1.0)
                 
                 mid_ind = paf.shape[0]//2 + 1
                 mm = (paf[mid_ind, 0]**2 + paf[mid_ind, 1]**2).sqrt()
-                axs[1].imshow(mm)
+                axs[-2].imshow(mm)
                 
                 mm, _ = (paf[:, 0]**2 + paf[:, 1]**2).sqrt().max(axis = 0)
-                axs[2].imshow(mm)
+                axs[-1].imshow(mm)
                 
                 for ss in target['skels']:
-                    axs[0].plot(ss[:, 0], ss[:, 1], '.-')
-                    axs[0].plot(ss[mid_ind, 0], ss[mid_ind, 1], 'o')
+                    axs[1].plot(ss[:, 0], ss[:, 1], '.-', lw=3)
+                    axs[1].plot(ss[mid_ind, 0], ss[mid_ind, 1], 'o', lw=3)
                     
                 for ax in axs:
                     ax.axis('off')

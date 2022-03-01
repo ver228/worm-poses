@@ -39,11 +39,17 @@ def process_single_img(model, roi, skels_true, scale_factor=1., n_segments=8):
     
     scores_abs = predictions[0]['scores_abs']
     
-    fig, axs = plt.subplots(2, 4, figsize = (20, 20), sharex = True, sharey = True)
+    fig, axs = plt.subplots(3, 4, figsize = (20, 20), sharex = True, sharey = True)
     for ax in axs.flatten():
         ax.imshow(roi, cmap = 'gray')
         ax.axis('off')
-        
+
+    fontsize=30
+    axs[0][0].set_title('Raw', fontsize=fontsize)
+    axs[0][1].set_title('GT', fontsize=fontsize)
+    axs[0][2].set_title('Landmarks Pred.', fontsize=fontsize)
+    axs[0][3].set_title('Direction Pred.', fontsize=fontsize)
+
     for skel in skels_true:
         axs[0][1].plot(skel[:, 0], skel[:, 1], '.')
     
@@ -61,10 +67,18 @@ def process_single_img(model, roi, skels_true, scale_factor=1., n_segments=8):
     paf = paf[0].detach().numpy()
     paf_max = np.linalg.norm(paf, axis = 1).max(axis=0)
     
+    axs[1][0].set_title('Belive Maps Max. Proj.', fontsize=fontsize)
     axs[1][0].imshow(cpm_max)
-    axs[1][1].imshow(paf_max)
-    axs[1][2].imshow(np.linalg.norm(paf[0], axis = 0))
-    axs[1][3].imshow(np.linalg.norm(paf[-1], axis = 0))
+    for ii, i_seg in enumerate([0, 3, 7]):
+        axs[1][ii+1].imshow(cpm[i_seg])
+        axs[1][ii+1].set_title(f'Belive Maps Seg-{i_seg}', fontsize=fontsize)
+
+    axs[2][0].set_title('PAF Max. Proj.', fontsize=fontsize)
+    axs[2][0].imshow(paf_max)
+    for ii, i_seg in enumerate([0, 3, 6]):
+        axs[2][ii+1].imshow(np.linalg.norm(paf[i_seg], axis = 0))
+        axs[2][ii+1].set_title(f'PAF Seg-{i_seg}', fontsize=fontsize)
+    
     return fig
 
 
@@ -89,22 +103,23 @@ def process_from_validation_data(model_path, validation_set_path, inds2process, 
         data_raw = pickle.load(fid)
     
     model.nms_min_distance = 1
-    
     dat = [data_raw[ii] for ii in inds2process]
     for ii, out in enumerate(tqdm.tqdm(dat)):
         roi = out[1] if out[1] is not None else out[0]
         skels_true = out[3]
         if skels_true.shape[0] < 1:
             continue
-        process_single_img(model, 
+        fig = process_single_img(model, 
                             roi, 
                             skels_true, 
                             scale_factor=scale_factor, 
                             n_segments=n_segments)
-        
+        fig.savefig(f'D{ii}.png')
 
 if __name__ == '__main__':
-    model_path = Path.home() / 'workspace/WormData/worm-poses/results' / set_type  / bn / 'model_best.pth.tar'
-    validation_set_path = '/Users/avelinojaver/OneDrive - Nexus365/worms/worm-poses/rois4training_filtered/manual_test.p.zip'
-    inds2process = [722, 721, 719, 717, 49, 48, 44, 41, 21, 17, 10]
+    model_path = Path('/Users/avelino/Downloads/Save_model/v5/v5_openpose_maxlikelihood_20220131_160257/model_best.pth.tar')
+    
+    #validation_set_path = '/Users/avelino/OneDrive - Imperial College London/OXFORD/onedrive_nexus/worms/worm-poses/rois4training/manual_test.p.zip'
+    validation_set_path = Path('/Users/avelino/Downloads/manual_test.p.zip')
+    inds2process = [49, 48, 44, 41, 21, 17, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9] #722, 721, 719, 717, 
     process_from_validation_data(model_path, validation_set_path, inds2process)
